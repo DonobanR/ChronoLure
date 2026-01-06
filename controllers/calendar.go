@@ -159,7 +159,12 @@ func (ps *PhishingServer) handleCalendarPhishPOST(w http.ResponseWriter, r *http
 
 	// Send JSON response with redirect
 	w.Header().Set("Content-Type", "application/json")
-	redirectURL := c.Page.RedirectURL
+	
+	// Priority: Use EventMeetingURL from campaign, fallback to Page RedirectURL
+	redirectURL := c.EventMeetingURL
+	if redirectURL == "" {
+		redirectURL = c.Page.RedirectURL
+	}
 	if redirectURL == "" {
 		redirectURL = "/"
 	}
