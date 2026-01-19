@@ -74,12 +74,28 @@ func (as *Server) Campaign(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET":
 		JSONResponse(w, c, http.StatusOK)
 	case r.Method == "DELETE":
-		err = models.DeleteCampaign(id)
+		// Soft delete - move to trash
+		// Read optional reason from body
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		err = models.SoftDeleteCampaign(id, ctx.Get(r, "user_id").(int64), req.Reason)
 		if err != nil {
-			JSONResponse(w, models.Response{Success: false, Message: "Error deleting campaign"}, http.StatusInternalServerError)
+			if err == models.ErrCampaignNotFound {
+				JSONResponse(w, models.Response{Success: false, Message: "Campaign not found"}, http.StatusNotFound)
+				return
+			}
+			if err == models.ErrPermissionDenied {
+				JSONResponse(w, models.Response{Success: false, Message: "Permission denied"}, http.StatusForbidden)
+				return
+			}
+			log.Errorf("Error soft deleting campaign %d: %v", id, err)
+			JSONResponse(w, models.Response{Success: false, Message: "Error moving campaign to trash"}, http.StatusInternalServerError)
 			return
 		}
-		JSONResponse(w, models.Response{Success: true, Message: "Campaign deleted successfully!"}, http.StatusOK)
+		JSONResponse(w, models.Response{Success: true, Message: "Campaign moved to trash"}, http.StatusOK)
 	}
 }
 
@@ -134,4 +150,140 @@ func (as *Server) CampaignComplete(w http.ResponseWriter, r *http.Request) {
 		}
 		JSONResponse(w, models.Response{Success: true, Message: "Campaign completed successfully!"}, http.StatusOK)
 	}
+}
+
+// CampaignsTrash returns campaigns in trash (soft deleted)
+func (as *Server) CampaignsTrash(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		JSONResponse(w, models.Response{Success: false, Message: "Method not allowed"}, http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := ctx.Get(r, "user_id").(int64)
+
+	// Parse pagination params
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if perPage < 1 || perPage > 100 {
+		perPage = 50
+	}
+	offset := (page - 1) * perPage
+
+	campaigns, total, err := models.GetTrashedCampaignsPaginated(userID, offset, perPage)
+	if err != nil {
+		log.Errorf("Error retrieving trashed campaigns: %v", err)
+		JSONResponse(w, models.Response{Success: false, Message: "Error retrieving trash"}, http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"campaigns": campaigns,
+		"total":     total,
+		"page":      page,
+		"per_page":  perPage,
+	}
+
+	JSONResponse(w, response, http.StatusOK)
+}
+
+// CampaignRestore restores a campaign from trash
+func (as *Server) CampaignRestore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		JSONResponse(w, models.Response{Success: false, Message: "Method not allowed"}, http.StatusMethodNotAllowed)
+		return
+	}
+
+	vars := mux.Vars(r)
+	id, _ := strconv.ParseInt(vars["id"], 0, 64)
+	userID := ctx.Get(r, "user_id").(int64)
+
+	result, err := models.RestoreCampaign(id, userID)
+	if err != nil {
+		if err == models.ErrCampaignNotFound {
+			JSONResponse(w, models.Response{Success: false, Message: "Campaign not found"}, http.StatusNotFound)
+			return
+		}
+		if err == models.ErrNotDeleted {
+			JSONResponse(w, models.Response{Success: false, Message: "Campaign is not in trash"}, http.StatusBadRequest)
+			return
+		}
+		if err == models.ErrPermissionDenied {
+			JSONResponse(w, models.Response{Success: false, Message: "Permission denied"}, http.StatusForbidden)
+			return
+		}
+		log.Errorf("Error restoring campaign %d: %v", id, err)
+		JSONResponse(w, models.Response{Success: false, Message: "Error restoring campaign"}, http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":      true,
+		"message":      "Campaign restored successfully",
+		"campaign":     result.Campaign,
+		"warnings":     result.Warnings,
+		"name_changed": result.NameChanged,
+	}
+
+	JSONResponse(w, response, http.StatusOK)
+}
+
+// CampaignPurge permanently deletes a campaign (hard delete)
+func (as *Server) CampaignPurge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "DELETE" {
+		JSONResponse(w, models.Response{Success: false, Message: "Method not allowed"}, http.StatusMethodNotAllowed)
+		return
+	}
+
+	vars := mux.Vars(r)
+	id, _ := strconv.ParseInt(vars["id"], 0, 64)
+	userID := ctx.Get(r, "user_id").(int64)
+
+	// Check if user is admin
+	user, err := models.GetUser(userID)
+	if err != nil {
+		log.Errorf("Error getting user %d: %v", userID, err)
+		JSONResponse(w, models.Response{Success: false, Message: "Error verifying permissions"}, http.StatusInternalServerError)
+		return
+	}
+
+	isAdmin := user.Role.Slug == "admin"
+	if !isAdmin {
+		JSONResponse(w, models.Response{Success: false, Message: "Admin privileges required"}, http.StatusForbidden)
+		return
+	}
+
+	// Read confirmation from body
+	var req struct {
+		Confirmation string `json:"confirmation"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, models.Response{Success: false, Message: "Invalid request body"}, http.StatusBadRequest)
+		return
+	}
+
+	// Get campaign to validate confirmation
+	c, err := models.GetCampaign(id, userID)
+	if err != nil {
+		JSONResponse(w, models.Response{Success: false, Message: "Campaign not found"}, http.StatusNotFound)
+		return
+	}
+
+	// Validate confirmation (must match campaign name or "DELETE")
+	if req.Confirmation != c.Name && req.Confirmation != "DELETE" {
+		JSONResponse(w, models.Response{Success: false, Message: "Confirmation does not match"}, http.StatusBadRequest)
+		return
+	}
+
+	// Purge
+	err = models.PurgeCampaign(id, userID, true)
+	if err != nil {
+		log.Errorf("Error purging campaign %d: %v", id, err)
+		JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusInternalServerError)
+		return
+	}
+
+	JSONResponse(w, models.Response{Success: true, Message: "Campaign permanently deleted"}, http.StatusOK)
 }

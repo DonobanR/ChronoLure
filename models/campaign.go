@@ -39,6 +39,14 @@ type Campaign struct {
 	EventDuration    int       `json:"event_duration,omitempty"` // in minutes
 	OrganizerName    string    `json:"organizer_name,omitempty"`
 	OrganizerEmail   string    `json:"organizer_email,omitempty"`
+	// Soft delete fields
+	DeletedAt         *time.Time `json:"deleted_at,omitempty" gorm:"index"`
+	DeletedBy         *int64     `json:"deleted_by,omitempty"`
+	RestoredAt        *time.Time `json:"restored_at,omitempty"`
+	RestoredBy        *int64     `json:"restored_by,omitempty"`
+	StatusBeforeDelete string    `json:"status_before_delete,omitempty"`
+	DeleteReason      string     `json:"delete_reason,omitempty" gorm:"type:text"`
+	Version           int        `json:"version" gorm:"default:0"`
 }
 
 // CampaignResults is a struct representing the results from a campaign
@@ -332,7 +340,7 @@ func getCampaignStats(cid int64) (CampaignStats, error) {
 // GetCampaigns returns the campaigns owned by the given user.
 func GetCampaigns(uid int64) ([]Campaign, error) {
 	cs := []Campaign{}
-	err := db.Model(&User{Id: uid}).Related(&cs).Error
+	err := db.Scopes(ScopeCampaignsActive).Where("user_id = ?", uid).Find(&cs).Error
 	if err != nil {
 		log.Error(err)
 	}
@@ -350,8 +358,8 @@ func GetCampaigns(uid int64) ([]Campaign, error) {
 func GetCampaignSummaries(uid int64) (CampaignSummaries, error) {
 	overview := CampaignSummaries{}
 	cs := []CampaignSummary{}
-	// Get the basic campaign information
-	query := db.Table("campaigns").Where("user_id = ?", uid)
+	// Get the basic campaign information (exclude deleted)
+	query := db.Table("campaigns").Where("user_id = ? AND deleted_at IS NULL", uid)
 	query = query.Select("id, name, created_date, launch_date, send_by_date, completed_date, status")
 	err := query.Scan(&cs).Error
 	if err != nil {
@@ -374,7 +382,7 @@ func GetCampaignSummaries(uid int64) (CampaignSummaries, error) {
 // GetCampaignSummary gets the summary object for a campaign specified by the campaign ID
 func GetCampaignSummary(id int64, uid int64) (CampaignSummary, error) {
 	cs := CampaignSummary{}
-	query := db.Table("campaigns").Where("user_id = ? AND id = ?", uid, id)
+	query := db.Table("campaigns").Where("user_id = ? AND id = ? AND deleted_at IS NULL", uid, id)
 	query = query.Select("id, name, created_date, launch_date, send_by_date, completed_date, status")
 	err := query.Scan(&cs).Error
 	if err != nil {

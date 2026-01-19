@@ -128,6 +128,7 @@ func (as *AdminServer) registerRoutes() {
 	router.HandleFunc("/logout", mid.Use(as.Logout, mid.RequireLogin))
 	router.HandleFunc("/reset_password", mid.Use(as.ResetPassword, mid.RequireLogin))
 	router.HandleFunc("/campaigns", mid.Use(as.Campaigns, mid.RequireLogin))
+	router.HandleFunc("/campaigns/trash", mid.Use(as.CampaignsTrash, mid.RequireLogin))
 	router.HandleFunc("/campaigns/{id:[0-9]+}", mid.Use(as.CampaignID, mid.RequireLogin))
 	router.HandleFunc("/templates", mid.Use(as.Templates, mid.RequireLogin))
 	router.HandleFunc("/groups", mid.Use(as.Groups, mid.RequireLogin))
@@ -208,6 +209,13 @@ func (as *AdminServer) Campaigns(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Campaigns"
 	getTemplate(w, "campaigns").ExecuteTemplate(w, "base", params)
+}
+
+// CampaignsTrash handles the trash view for campaigns
+func (as *AdminServer) CampaignsTrash(w http.ResponseWriter, r *http.Request) {
+	params := newTemplateParams(r)
+	params.Title = "Campaign Trash"
+	getTemplate(w, "campaigns_trash").ExecuteTemplate(w, "base", params)
 }
 
 // CampaignID handles the default path and template execution

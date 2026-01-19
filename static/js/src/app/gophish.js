@@ -92,7 +92,7 @@ var api = {
         get: function (id) {
             return query("/campaigns/" + id, "GET", {}, true)
         },
-        // delete() - Deletes a campaign at DELETE /campaigns/:id
+        // delete() - Deletes a campaign at DELETE /campaigns/:id (soft delete - moves to trash)
         delete: function (id) {
             return query("/campaigns/" + id, "DELETE", {}, false)
         },
@@ -107,6 +107,21 @@ var api = {
         // summary() - Queries the API for GET /campaigns/summary
         summary: function (id) {
             return query("/campaigns/" + id + "/summary", "GET", {}, true)
+        },
+        // restore() - Restores a campaign from trash at POST /campaigns/:id/restore
+        restore: function (id) {
+            return query("/campaigns/" + id + "/restore", "POST", {}, false)
+        },
+        // purge() - Permanently deletes a campaign at DELETE /campaigns/:id/purge
+        purge: function (id, confirmData) {
+            return query("/campaigns/" + id + "/purge", "DELETE", confirmData || {}, false)
+        }
+    },
+    // campaignsTrash contains endpoints for trash operations
+    campaignsTrash: {
+        // get() - Queries the API for GET /campaigns/trash
+        get: function () {
+            return query("/campaigns/trash", "GET", {}, false)
         }
     },
     // groups contains the endpoints for /groups

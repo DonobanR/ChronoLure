@@ -4,6 +4,7 @@ module.exports = {
     context: path.resolve(__dirname, 'static', 'js', 'src', 'app'),
     entry: {
         campaigns: './campaigns',
+        campaigns_trash: './campaigns_trash',
         passwords: './passwords',
         users: './users',
         webhooks: './webhooks',

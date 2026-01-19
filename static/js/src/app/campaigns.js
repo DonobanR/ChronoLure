@@ -126,7 +126,7 @@ function launch() {
 }
 
 // Attempts to send a test email by POSTing to /campaigns/
-function sendTestEmail() {
+window.sendTestEmail = function() {
     var test_email_request = {
         template: {
             name: $("#template").select2("data")[0].text
@@ -159,7 +159,7 @@ function sendTestEmail() {
         })
 }
 
-function dismiss() {
+window.dismiss = function() {
     $("#modal\\.flashes").empty();
     $("#name").val("");
     $("#campaign_type").val("email").change();
@@ -180,14 +180,14 @@ function dismiss() {
     $("#modal").modal('hide');
 }
 
-function deleteCampaign(idx) {
+window.deleteCampaign = function(idx) {
     Swal.fire({
-        title: "Are you sure?",
-        text: "This will delete the campaign. This can't be undone!",
+        title: "Move to Trash?",
+        html: "This will move the campaign to the trash.<br><small class='text-muted'>You can restore it from the Trash page.</small>",
         type: "warning",
         animation: false,
         showCancelButton: true,
-        confirmButtonText: "Delete " + campaigns[idx].name,
+        confirmButtonText: "Move to Trash",
         confirmButtonColor: "#428bca",
         reverseButtons: true,
         allowOutsideClick: false,
@@ -204,11 +204,13 @@ function deleteCampaign(idx) {
         }
     }).then(function (result) {
         if (result.value){
-            Swal.fire(
-                'Campaign Deleted!',
-                'This campaign has been deleted!',
-                'success'
-            );
+            Swal.fire({
+                title: 'Campaign Moved to Trash!',
+                html: 'The campaign "<strong>' + escapeHtml(campaigns[idx].name) + '</strong>" has been moved to trash.<br>' +
+                      '<small class="text-muted">You can restore it from the <a href="/campaigns/trash">Trash page</a>.</small>',
+                type: 'success',
+                confirmButtonText: 'OK'
+            });
         }
         $('button:contains("OK")').on('click', function () {
             location.reload()
@@ -315,11 +317,11 @@ function setupOptions() {
         });
 }
 
-function edit(campaign) {
+window.edit = function(campaign) {
     setupOptions();
 }
 
-function copy(idx) {
+window.copy = function(idx) {
     setupOptions();
     // Set our initial values
     api.campaignId.get(campaigns[idx].id)
@@ -468,7 +470,7 @@ $(document).ready(function () {
             <span data-toggle='modal' data-backdrop='static' data-target='#modal'><button class='btn btn-primary' data-toggle='tooltip' data-placement='left' title='Copy Campaign' onclick='copy(" + i + ")'>\
                     <i class='fa fa-copy'></i>\
                     </button></span>\
-                    <button class='btn btn-danger' onclick='deleteCampaign(" + i + ")' data-toggle='tooltip' data-placement='left' title='Delete Campaign'>\
+                    <button class='btn btn-danger' onclick='deleteCampaign(" + i + ")' data-toggle='tooltip' data-placement='left' title='Move to Trash'>\
                     <i class='fa fa-trash-o'></i>\
                     </button></div>"
                     ]

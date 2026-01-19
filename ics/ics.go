@@ -24,7 +24,6 @@ type CalendarEvent struct {
 
 // Generate creates an .ICS file content from the CalendarEvent
 func (e *CalendarEvent) Generate() string {
-	// Format times in UTC for .ICS (YYYYMMDDTHHmmssZ)
 	startTime := e.StartTime.UTC().Format("20060102T150405Z")
 	endTime := e.EndTime.UTC().Format("20060102T150405Z")
 	timestamp := time.Now().UTC().Format("20060102T150405Z")

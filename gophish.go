@@ -26,11 +26,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"gopkg.in/alecthomas/kingpin.v2"
 
@@ -42,6 +44,7 @@ import (
 	"github.com/gophish/gophish/middleware"
 	"github.com/gophish/gophish/models"
 	"github.com/gophish/gophish/webhook"
+	"github.com/gophish/gophish/worker"
 )
 
 const (
@@ -121,9 +124,20 @@ func main() {
 	phishServer := controllers.NewPhishingServer(phishConfig)
 
 	imapMonitor := imap.NewMonitor()
+
+	// Initialize Trash TTL Job
+	ctx, cancelTTL := context.WithCancel(context.Background())
+	trashTTLJob := worker.NewTrashTTLJob(worker.TrashTTLConfig{
+		RetentionDays: conf.TrashRetentionDays,
+		Interval:      time.Duration(conf.TrashPurgeInterval) * time.Minute,
+		BatchSize:     conf.TrashPurgeBatchSize,
+		Enabled:       conf.TrashPurgeEnabled || conf.TrashPurgeInterval > 0, // Auto-enable if interval set
+	})
+
 	if *mode == "admin" || *mode == "all" {
 		go adminServer.Start()
 		go imapMonitor.Start()
+		trashTTLJob.Start(ctx)
 	}
 	if *mode == "phish" || *mode == "all" {
 		go phishServer.Start()
@@ -135,6 +149,7 @@ func main() {
 	<-c
 	log.Info("CTRL+C Received... Gracefully shutting down servers")
 	if *mode == modeAdmin || *mode == modeAll {
+		cancelTTL() // Stop TTL job
 		adminServer.Shutdown()
 		imapMonitor.Shutdown()
 	}
