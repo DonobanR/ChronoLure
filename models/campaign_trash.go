@@ -218,8 +218,13 @@ func RestoreCampaign(campaignID int64, userID int64) (*RestoreResult, error) {
 	c.RestoredAt = &now
 	c.RestoredBy = &userID
 
-	// Set safe status (paused/created, not auto-sending)
-	c.Status = CampaignCreated
+	// Restore original status to maintain campaign telemetry
+	if c.StatusBeforeDelete != "" {
+		c.Status = c.StatusBeforeDelete
+	} else {
+		// Fallback if status_before_delete wasn't saved (older deletions)
+		c.Status = CampaignCreated
+	}
 	c.Version++
 
 	// Save using Unscoped() to ensure we can update soft-deleted records
