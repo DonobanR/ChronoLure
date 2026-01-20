@@ -76,6 +76,10 @@ var statuses = {
         icon: "fa-spinner",
         point: "ct-point-sending"
     },
+    "Created": {
+        label: "label-success",
+        icon: "fa-rocket"
+    },
     "Campaign Created": {
         label: "label-success",
         icon: "fa-rocket"
@@ -196,7 +200,7 @@ function generateStatsPieCharts(campaigns) {
             title: status_label,
             name: status,
             data: stats_data,
-            colors: [statuses[status_label].color, "#dddddd"]
+            colors: [(statuses[status_label] && statuses[status_label].color) || "#999999", "#dddddd"]
         })
 
         stats_data = []
@@ -329,7 +333,7 @@ $(document).ready(function () {
                 campaignRows = []
                 $.each(campaigns, function (i, campaign) {
                     var campaign_date = moment(campaign.created_date).format('MMMM Do YYYY, h:mm:ss a')
-                    var label = statuses[campaign.status].label || "label-default";
+                    var label = (statuses[campaign.status] && statuses[campaign.status].label) || "label-default";
                     //section for tooltips on the status of a campaign to show some quick stats
                     var launchDate;
                     if (moment(campaign.launch_date).isAfter(moment())) {
