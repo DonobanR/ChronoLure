@@ -255,13 +255,14 @@ function purgeCampaign() {
     
     var campaign = trashCampaigns[currentCampaignIndex];
     var $btn = $("#confirmPurge");
+    var confirmationText = $("#purgeConfirmText").val();
     
     // Disable button and show loading
     $btn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Deleting...');
     
     // Send confirmation data
     var confirmData = {
-        confirm: true
+        confirmation: confirmationText
     };
     
     api.campaignId.purge(campaign.id, confirmData)

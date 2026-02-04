@@ -258,15 +258,23 @@ func (as *Server) CampaignPurge(w http.ResponseWriter, r *http.Request) {
 	// Read confirmation from body
 	var req struct {
 		Confirmation string `json:"confirmation"`
+		Confirm      bool   `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		JSONResponse(w, models.Response{Success: false, Message: "Invalid request body"}, http.StatusBadRequest)
 		return
 	}
+	if req.Confirmation == "" && req.Confirm {
+		req.Confirmation = "DELETE"
+	}
 
 	// Get campaign to validate confirmation
-	c, err := models.GetCampaign(id, userID)
+	c, err := models.GetTrashedCampaignByID(id, userID)
 	if err != nil {
+		if err == models.ErrCampaignNotFound {
+			JSONResponse(w, models.Response{Success: false, Message: "Campaign not found"}, http.StatusNotFound)
+			return
+		}
 		JSONResponse(w, models.Response{Success: false, Message: "Campaign not found"}, http.StatusNotFound)
 		return
 	}

@@ -282,7 +282,7 @@ func PurgeCampaign(campaignID int64, userID int64, isAdmin bool) error {
 
 	// Lock campaign
 	c := &Campaign{}
-	if err := lockForUpdate(tx).First(c, campaignID).Error; err != nil {
+	if err := lockForUpdate(tx).Unscoped().First(c, campaignID).Error; err != nil {
 		tx.Rollback()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrCampaignNotFound
@@ -337,15 +337,8 @@ func PurgeCampaign(campaignID int64, userID int64, isAdmin bool) error {
 		return err
 	}
 
-	// 4. Campaign-Group associations (many-to-many)
-	if err := tx.Exec("DELETE FROM campaign_groups WHERE campaign_id = ?", campaignID).Error; err != nil {
-		tx.Rollback()
-		log.Errorf("Failed to delete campaign_groups for campaign %d: %v", campaignID, err)
-		return err
-	}
-
-	// 5. Campaign itself
-	if err := tx.Delete(c).Error; err != nil {
+	// 4. Campaign itself (hard delete)
+	if err := tx.Unscoped().Delete(c).Error; err != nil {
 		tx.Rollback()
 		log.Errorf("Failed to delete campaign %d: %v", campaignID, err)
 		return err
@@ -386,6 +379,21 @@ func GetTrashedCampaigns(userID int64) ([]Campaign, error) {
 	}
 
 	return campaigns, nil
+}
+
+// GetTrashedCampaignByID retrieves a single deleted campaign for a user
+func GetTrashedCampaignByID(campaignID int64, userID int64) (Campaign, error) {
+	c := Campaign{}
+	err := db.Unscoped().Scopes(ScopeCampaignsTrashed).
+		Where("user_id = ? AND id = ?", userID, campaignID).
+		First(&c).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return c, ErrCampaignNotFound
+		}
+		return c, err
+	}
+	return c, nil
 }
 
 // GetTrashedCampaignsPaginated retrieves deleted campaigns with pagination
@@ -516,15 +524,8 @@ func PurgeSystemCampaign(campaignID int64) error {
 		return err
 	}
 
-	// 4. Campaign-Group associations (many-to-many)
-	if err := tx.Exec("DELETE FROM campaign_groups WHERE campaign_id = ?", campaignID).Error; err != nil {
-		tx.Rollback()
-		log.Errorf("Failed to delete campaign_groups for campaign %d: %v", campaignID, err)
-		return err
-	}
-
-	// 5. Campaign itself
-	if err := tx.Delete(c).Error; err != nil {
+	// 4. Campaign itself (hard delete)
+	if err := tx.Unscoped().Delete(c).Error; err != nil {
 		tx.Rollback()
 		log.Errorf("Failed to delete campaign %d: %v", campaignID, err)
 		return err
