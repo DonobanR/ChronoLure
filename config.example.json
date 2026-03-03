@@ -1,0 +1,30 @@
+{
+  "admin_server": {
+    "listen_url": "0.0.0.0:3333",
+    "use_tls": true,
+    "cert_path": "gophish_admin.crt",
+    "key_path": "gophish_admin.key",
+    "csrf_key": "CHANGE_THIS_TO_RANDOM_32_CHAR_STRING",
+    "allowed_internal_hosts": [],
+    "trusted_origins": []
+  },
+  "phish_server": {
+    "listen_url": "0.0.0.0:80",
+    "use_tls": false,
+    "cert_path": "example.crt",
+    "key_path": "example.key"
+  },
+  "db_name": "mysql",
+  "db_path": "user:password@tcp(localhost:3306)/gophish?charset=utf8mb4&parseTime=True&loc=UTC",
+  "db_sslca_path": "",
+  "migrations_prefix": "db/db_",
+  "contact_address": "admin@example.com",
+  "logging": {
+    "filename": "gophish.log",
+    "level": "info"
+  },
+  "trash_retention_days": 90,
+  "trash_purge_enabled": true,
+  "trash_purge_interval_minutes": 60,
+  "trash_purge_batch_size": 100
+}

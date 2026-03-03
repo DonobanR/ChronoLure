@@ -29,6 +29,9 @@
             <button id="complete_button" type="button" class="btn btn-blue" data-toggle="tooltip" onclick="completeCampaign()">
                 <i class="fa fa-flag-checkered"></i> Complete
             </button>
+            <button type="button" class="btn btn-success" data-toggle="modal" data-target="#linkCampaignsModal">
+                <i class="fa fa-link"></i> Entrelazar Campañas
+            </button>
             <button type="button" class="btn btn-danger" data-toggle="tooltip" onclick="deleteCampaign()">
                 <i class="fa fa-trash-o fa-lg"></i> Delete
             </button>
@@ -86,6 +89,49 @@
     </div>
     <div id="flashes" class="row"></div>
 </div>
+
+<!-- Link Campaigns Modal -->
+<div class="modal fade" id="linkCampaignsModal" tabindex="-1" role="dialog" aria-labelledby="linkCampaignsModalLabel">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <h4 class="modal-title" id="linkCampaignsModalLabel">Entrelazar Campañas</h4>
+            </div>
+            <div class="modal-body">
+                <div id="link-modal-flashes"></div>
+                <p class="text-muted">Link campaigns together to track combined telemetry and recipient journeys.</p>
+                <div class="form-group">
+                    <label for="linkGroupName">Group Name:</label>
+                    <input type="text" class="form-control" id="linkGroupName" placeholder="Enter group name">
+                </div>
+                <div class="form-group">
+                    <label>Campaigns in this group:</label>
+                    <div id="linkCampaignTags" style="min-height:42px; padding:6px 6px 3px; border:1px solid #ddd; border-radius:4px; background:#fafafa;"></div>
+                </div>
+                <div class="form-group">
+                    <label>Add more campaigns:</label>
+                    <div style="position:relative;">
+                        <div class="input-group">
+                            <span class="input-group-addon"><i class="fa fa-search"></i></span>
+                            <input type="text" class="form-control" id="linkCampaignSearch"
+                                placeholder="Search campaign by name..." autocomplete="off">
+                        </div>
+                        <div id="linkCampaignDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; z-index:1050; max-height:200px; overflow-y:auto; background:#fff; border:1px solid #ccc; border-radius:0 0 4px 4px; box-shadow:0 4px 8px rgba(0,0,0,.15);"></div>
+                    </div>
+                    <small class="text-muted"><i class="fa fa-info-circle"></i> Type to search and click to add. The current campaign is always included.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="linkCampaignsToGroup()">Create Group</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {{end}} {{define "scripts"}}
 <script src="/js/dist/app/campaign_results.min.js"></script>
 {{end}}

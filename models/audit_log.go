@@ -12,6 +12,11 @@ const (
 	AuditCampaignSoftDeleted = "CAMPAIGN_SOFT_DELETED"
 	AuditCampaignRestored    = "CAMPAIGN_RESTORED"
 	AuditCampaignPurged      = "CAMPAIGN_PURGED"
+
+	// Campaign Group trash actions
+	AuditGroupSoftDeleted = "CAMPAIGN_GROUP_SOFT_DELETED"
+	AuditGroupRestored    = "CAMPAIGN_GROUP_RESTORED"
+	AuditGroupPurged      = "CAMPAIGN_GROUP_PURGED"
 )
 
 // AuditLog represents an audit trail entry

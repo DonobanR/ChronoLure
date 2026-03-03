@@ -128,8 +128,12 @@ func (as *AdminServer) registerRoutes() {
 	router.HandleFunc("/logout", mid.Use(as.Logout, mid.RequireLogin))
 	router.HandleFunc("/reset_password", mid.Use(as.ResetPassword, mid.RequireLogin))
 	router.HandleFunc("/campaigns", mid.Use(as.Campaigns, mid.RequireLogin))
-	router.HandleFunc("/campaigns/trash", mid.Use(as.CampaignsTrash, mid.RequireLogin))
+	router.HandleFunc("/campaigns/trash", mid.Use(as.CampaignsTrashRedirect, mid.RequireLogin))
 	router.HandleFunc("/campaigns/{id:[0-9]+}", mid.Use(as.CampaignID, mid.RequireLogin))
+	router.HandleFunc("/campaign-groups", mid.Use(as.CampaignGroups, mid.RequireLogin))
+	router.HandleFunc("/campaign-groups/trash", mid.Use(as.CampaignGroupsTrashRedirect, mid.RequireLogin))
+	router.HandleFunc("/campaign-groups/{id:[0-9]+}", mid.Use(as.CampaignGroupID, mid.RequireLogin))
+	router.HandleFunc("/trash", mid.Use(as.GlobalTrashPage, mid.RequireLogin))
 	router.HandleFunc("/templates", mid.Use(as.Templates, mid.RequireLogin))
 	router.HandleFunc("/groups", mid.Use(as.Groups, mid.RequireLogin))
 	router.HandleFunc("/landing_pages", mid.Use(as.LandingPages, mid.RequireLogin))
@@ -211,11 +215,9 @@ func (as *AdminServer) Campaigns(w http.ResponseWriter, r *http.Request) {
 	getTemplate(w, "campaigns").ExecuteTemplate(w, "base", params)
 }
 
-// CampaignsTrash handles the trash view for campaigns
-func (as *AdminServer) CampaignsTrash(w http.ResponseWriter, r *http.Request) {
-	params := newTemplateParams(r)
-	params.Title = "Campaign Trash"
-	getTemplate(w, "campaigns_trash").ExecuteTemplate(w, "base", params)
+// CampaignsTrashRedirect redirects the old per-entity trash URL to the global trash page.
+func (as *AdminServer) CampaignsTrashRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/trash?type=campaign", http.StatusFound)
 }
 
 // CampaignID handles the default path and template execution
@@ -223,6 +225,32 @@ func (as *AdminServer) CampaignID(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Campaign Results"
 	getTemplate(w, "campaign_results").ExecuteTemplate(w, "base", params)
+}
+
+// CampaignGroups handles the campaign groups list page
+func (as *AdminServer) CampaignGroups(w http.ResponseWriter, r *http.Request) {
+	params := newTemplateParams(r)
+	params.Title = "Campaign Groups"
+	getTemplate(w, "campaign_groups").ExecuteTemplate(w, "base", params)
+}
+
+// CampaignGroupsTrashRedirect redirects the old per-entity trash URL to the global trash page.
+func (as *AdminServer) CampaignGroupsTrashRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/trash?type=campaign_group", http.StatusFound)
+}
+
+// GlobalTrashPage handles the unified global trash page.
+func (as *AdminServer) GlobalTrashPage(w http.ResponseWriter, r *http.Request) {
+	params := newTemplateParams(r)
+	params.Title = "Trash"
+	getTemplate(w, "trash").ExecuteTemplate(w, "base", params)
+}
+
+// CampaignGroupID handles the campaign group detail page
+func (as *AdminServer) CampaignGroupID(w http.ResponseWriter, r *http.Request) {
+	params := newTemplateParams(r)
+	params.Title = "Campaign Group Results"
+	getTemplate(w, "campaign_group_results").ExecuteTemplate(w, "base", params)
 }
 
 // Templates handles the default path and template execution

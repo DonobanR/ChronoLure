@@ -124,6 +124,53 @@ var api = {
             return query("/campaigns/trash", "GET", {}, false)
         }
     },
+    // campaign_groups contains the endpoints for /campaign-groups
+    campaign_groups: {
+        // get() - Queries the API for GET /campaign-groups
+        get: function (id) {
+            return query("/campaign-groups/" + id, "GET", {}, false)
+        },
+        // post() - Posts a campaign group to POST /campaign-groups
+        post: function (data) {
+            return query("/campaign-groups/", "POST", data, false)
+        },
+        // put() - Updates a campaign group at PUT /campaign-groups/:id
+        put: function (id, data) {
+            return query("/campaign-groups/" + id, "PUT", data, false)
+        },
+        // delete() - Soft-deletes a campaign group (moves to trash) at DELETE /campaign-groups/:id
+        delete: function (id, reason) {
+            return query("/campaign-groups/" + id, "DELETE", {reason: reason || ""}, false)
+        },
+        // summary() - Queries the API for GET /campaign-groups/summary
+        summary: function () {
+            return query("/campaign-groups/summary", "GET", {}, false)
+        },
+        // stats() - Queries the API for GET /campaign-groups/:id/stats
+        stats: function (id) {
+            return query("/campaign-groups/" + id + "/stats", "GET", {}, false)
+        },
+        // archive() - Archives or unarchives a campaign group at POST /campaign-groups/:id/archive
+        archive: function (id, archived) {
+            return query("/campaign-groups/" + id + "/archive", "POST", {archived: archived}, false)
+        }
+    },
+    // globalTrash contains endpoints for the unified global trash
+    globalTrash: {
+        // list() - GET /api/trash?type=...  (type defaults to "all")
+        list: function (type) {
+            var qs = (type && type !== 'all') ? '?type=' + encodeURIComponent(type) : '';
+            return query('/trash' + qs, 'GET', null, false)
+        },
+        // restore() - POST /api/trash/{type}/{id}/restore
+        restore: function (itemType, id) {
+            return query('/trash/' + encodeURIComponent(itemType) + '/' + id + '/restore', 'POST', {}, false)
+        },
+        // purge() - DELETE /api/trash/{type}/{id}/purge
+        purge: function (itemType, id) {
+            return query('/trash/' + encodeURIComponent(itemType) + '/' + id + '/purge', 'DELETE', {}, false)
+        }
+    },
     // groups contains the endpoints for /groups
     groups: {
         // get() - Queries the API for GET /groups

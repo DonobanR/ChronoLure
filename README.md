@@ -115,6 +115,30 @@ ChronoLure is designed for authorized security testing only. Users must:
 
 Unauthorized use of this tool may violate laws. The developers assume no liability for misuse.
 
-## 📄 License
+## �️ Global Trash System
+
+ChronoLure includes a unified **Windows Recycle Bin–style trash** at `/trash` that aggregates soft-deleted items from all supported models in one place, filterable by type.
+
+### Adding a New Model to the Global Trash
+
+The aggregator lives in `models/global_trash.go` and is designed to be extended with minimal effort. To add a new entity type (e.g. `Template`, `LandingPage`):
+
+1. **Add soft-delete fields** — Embed `TrashableModel` in the model struct, or manually add columns:
+   `deleted_at`, `deleted_by`, `delete_reason`, `restored_at`, `restored_by`.
+   Add a DB migration for both `db/db_sqlite3/migrations/` and `db/db_mysql/migrations/`.
+
+2. **Implement Trashable** — Create `models/yourmodel_trash.go`:
+   - Implement: `GetID()`, `GetUserID()`, `GetName()`, `GetEntityType()`, `GetTableName()`, `PurgeDependencies(tx)`
+   - Add wrapper functions: `SoftDeleteYourModel`, `RestoreYourModel`, `PurgeYourModel`, `GetTrashedYourModels`
+
+3. **Register in the aggregator** — In `models/global_trash.go`:
+   - Add a constant: `TrashTypeYourModel = "your_model"`
+   - In `GetTrashItems`: add a collector branch for `TrashTypeYourModel`
+   - In `RestoreTrashItem`: add a `case TrashTypeYourModel:` that calls `RestoreYourModel`
+   - In `PurgeTrashItem`: add a `case TrashTypeYourModel:` that calls `PurgeYourModel`
+
+4. **Done.** No template, JS, or route changes required — the `/trash` page renders type badges automatically and the filter tab counts update on their own.
+
+## �📄 License
 
 MIT License - See LICENSE file for details

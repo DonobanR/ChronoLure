@@ -1,0 +1,136 @@
+{{define "body"}}
+<div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
+    <div class="row">
+        <h1 class="page-header">
+            <i class="fa fa-trash-o"></i> Campaign Groups Trash
+        </h1>
+    </div>
+    <div id="flashes" class="row"></div>
+    <div class="row">
+        <p class="text-muted">
+            <i class="fa fa-info-circle"></i>
+            Deleted campaign groups are kept here before being permanently removed.
+            You can restore groups or permanently delete them.
+            <strong>Campaigns inside the groups are never deleted.</strong>
+        </p>
+    </div>
+    &nbsp;
+
+    <div id="loading">
+        <i class="fa fa-spinner fa-spin fa-4x"></i>
+    </div>
+
+    <div id="emptyMessage" class="row" style="display:none;">
+        <div class="alert alert-info">
+            <i class="fa fa-check-circle"></i> No campaign groups in trash. All clean!
+            <a href="/campaign-groups" class="alert-link" style="margin-left: 10px;">
+                <i class="fa fa-arrow-left"></i> Back to Campaign Groups
+            </a>
+        </div>
+    </div>
+
+    <div id="errorMessage" class="row" style="display:none;">
+        <div class="alert alert-danger">
+            <i class="fa fa-exclamation-circle"></i> <span id="errorText">Error loading trash.</span>
+            <button class="btn btn-sm btn-default" onclick="loadTrashGroups()" style="margin-left: 10px;">
+                <i class="fa fa-refresh"></i> Retry
+            </button>
+        </div>
+    </div>
+
+    <div class="row">
+        <table id="trashTable" class="table table-striped table-bordered" style="display:none;">
+            <thead>
+                <tr>
+                    <th class="col-md-3">Name</th>
+                    <th class="col-md-2">Deleted At</th>
+                    <th class="col-md-2">Deleted By</th>
+                    <th class="col-md-2">Reason</th>
+                    <th class="col-md-3 no-sort">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Restore Confirmation Modal -->
+<div class="modal fade" id="restoreModal" tabindex="-1" role="dialog" aria-labelledby="restoreModalLabel">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <h4 class="modal-title" id="restoreModalLabel">
+                    <i class="fa fa-undo"></i> Restore Campaign Group
+                </h4>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to restore the campaign group "<strong id="restoreGroupName"></strong>"?</p>
+                <p class="text-info">
+                    <i class="fa fa-info-circle"></i>
+                    The group will be restored along with all its campaign associations.
+                </p>
+                <div id="restoreWarning" class="alert alert-warning" style="display:none;">
+                    <i class="fa fa-exclamation-triangle"></i> <span id="restoreWarningText"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" id="confirmRestore">
+                    <i class="fa fa-undo"></i> Restore Group
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Purge Confirmation Modal -->
+<div class="modal fade" id="purgeModal" tabindex="-1" role="dialog" aria-labelledby="purgeModalLabel">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-danger">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <h4 class="modal-title" id="purgeModalLabel">
+                    <i class="fa fa-exclamation-triangle"></i> Permanently Delete Campaign Group
+                </h4>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger">
+                    <strong><i class="fa fa-warning"></i> WARNING: This action cannot be undone!</strong>
+                </div>
+                <p>You are about to <strong>permanently delete</strong> the campaign group:</p>
+                <p class="text-center"><strong id="purgeGroupName" style="font-size: 1.2em;"></strong></p>
+                <p>The following will be permanently removed:</p>
+                <ul>
+                    <li>The campaign group record</li>
+                    <li>All campaign associations in this group</li>
+                </ul>
+                <p class="text-success">
+                    <i class="fa fa-check"></i>
+                    <strong>Your campaigns will NOT be deleted.</strong>
+                </p>
+                <hr>
+                <p><strong>To confirm, please type the group name exactly:</strong></p>
+                <input type="text" class="form-control" id="purgeConfirmText" placeholder="Type group name here">
+                <p class="text-muted" style="margin-top: 5px;">
+                    <small>Group name: <code id="purgeExpectedName"></code></small>
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmPurge" disabled>
+                    <i class="fa fa-trash"></i> Permanently Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
+{{define "scripts"}}
+<script src="/js/dist/app/campaign_groups_trash.min.js"></script>
+{{end}}

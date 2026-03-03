@@ -1,5 +1,6 @@
 var map = null
 var doPoll = true;
+var linkSelected = [] // [{id, name, status}] – additional campaigns for the link modal
 
 // statuses is a helper map to point result statuses to ui classes
 var statuses = {
@@ -970,4 +971,171 @@ $(document).ready(function () {
 
     // Start the polling loop
     setRefresh = setTimeout(refresh, 60000)
+
+    // Load available campaigns when link modal opens
+    $('#linkCampaignsModal').on('show.bs.modal', function () {
+        loadCampaignsForLinking()
+    })
+
+    // Reset picker state on modal close
+    $('#linkCampaignsModal').on('hidden.bs.modal', function () {
+        linkSelected = []
+        renderLinkTags()
+        $('#linkCampaignSearch').val('')
+        $('#linkCampaignDropdown').empty().hide()
+        $('#link-modal-flashes').empty()
+    })
+
+    // Picker: filter as-you-type
+    $('#linkCampaignSearch').on('input', function () {
+        var q = $(this).val().toLowerCase().trim()
+        var $d = $('#linkCampaignDropdown')
+        if (!q) { $d.empty().hide(); return }
+
+        var allCampaigns = window._linkAllCampaigns || []
+        var selectedIds = linkSelected.map(function (c) { return c.id })
+        var matches = allCampaigns.filter(function (c) {
+            return selectedIds.indexOf(c.id) === -1 &&
+                   c.name.toLowerCase().indexOf(q) !== -1
+        })
+
+        $d.empty()
+        if (matches.length === 0) {
+            $d.append($('<div>').text('No campaigns found')
+                .css({padding: '8px 12px', color: '#999', fontSize: '13px'}))
+        } else {
+            matches.forEach(function (c) {
+                $('<div>')
+                    .css({padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #eee', fontSize: '13px'})
+                    .html('<strong>' + escapeHtml(c.name) + '</strong>&nbsp;<span class="label label-default">' + escapeHtml(c.status) + '</span>')
+                    .hover(
+                        function () { $(this).css('background', '#eef3ff') },
+                        function () { $(this).css('background', '') }
+                    )
+                    .on('click', (function (cam) {
+                        return function () {
+                            linkSelected.push({id: cam.id, name: cam.name, status: cam.status})
+                            renderLinkTags()
+                            $('#linkCampaignSearch').val('').focus()
+                            $d.empty().hide()
+                        }
+                    })(c))
+                    .appendTo($d)
+            })
+        }
+        $d.show()
+    }).on('keydown', function (e) {
+        if (e.key === 'Enter') e.preventDefault()
+    })
+
+    // Hide dropdown when clicking outside
+    $(document).on('click.linkPicker', function (e) {
+        if (!$(e.target).closest('#linkCampaignSearch, #linkCampaignDropdown').length) {
+            $('#linkCampaignDropdown').hide()
+        }
+    })
 })
+
+// Load campaigns available for linking (excludes current campaign)
+function loadCampaignsForLinking() {
+    linkSelected = []
+    renderLinkTags()
+    $('#linkCampaignSearch').val('')
+    $('#linkCampaignDropdown').empty().hide()
+    $('#linkGroupName').val('Group - ' + (campaign ? campaign.name : ''))
+
+    api.campaigns.summary()
+        .success(function (response) {
+            // Store all campaigns except the current one for the picker
+            window._linkAllCampaigns = (response.campaigns || []).filter(function (c) {
+                return c.id !== parseInt(campaign.id)
+            })
+        })
+        .error(function () {
+            linkModalFlash('Error loading campaigns', 'danger')
+        })
+}
+
+function removeLinkCampaign(id) {
+    linkSelected = linkSelected.filter(function (x) { return x.id !== id })
+    renderLinkTags()
+}
+
+function renderLinkTags() {
+    var $c = $('#linkCampaignTags')
+    $c.empty()
+    // Current campaign – locked (non-removable) green tag
+    if (campaign && campaign.name) {
+        $('<span>')
+            .css({
+                display: 'inline-flex', alignItems: 'center',
+                margin: '2px 4px 2px 0', padding: '4px 10px',
+                background: '#5cb85c', color: '#fff',
+                borderRadius: '3px', fontSize: '13px'
+            })
+            .html('<i class="fa fa-lock" style="margin-right:5px;font-size:11px;"></i>' + escapeHtml(campaign.name))
+            .appendTo($c)
+    }
+    // Additional selected campaigns – removable blue tags
+    linkSelected.forEach(function (c) {
+        var $tag = $('<span>')
+            .css({
+                display: 'inline-flex', alignItems: 'center',
+                margin: '2px 4px 2px 0', padding: '4px 10px',
+                background: '#337ab7', color: '#fff',
+                borderRadius: '3px', fontSize: '13px'
+            })
+            .text(c.name)
+        $('<a href="#">')
+            .html('&nbsp;&times;')
+            .css({color: 'rgba(255,255,255,.75)', textDecoration: 'none', fontWeight: 'bold', marginLeft: '4px', fontSize: '15px'})
+            .on('click', (function (cid) {
+                return function (e) { e.preventDefault(); removeLinkCampaign(cid) }
+            })(c.id))
+            .appendTo($tag)
+        $c.append($tag)
+    })
+}
+
+// Link campaigns to a new group
+function linkCampaignsToGroup() {
+    var groupName = $('#linkGroupName').val().trim()
+    if (!groupName) { linkModalFlash('Group name is required', 'danger'); return }
+
+    // Always start with the current campaign at index 0
+    var campaignList = [{campaign_id: parseInt(campaign.id), order_index: 0}]
+    linkSelected.forEach(function (c, i) {
+        campaignList.push({campaign_id: c.id, order_index: i + 1})
+    })
+
+    api.campaign_groups.post({
+        name: groupName,
+        campaigns: campaignList,
+        archived: false
+    })
+    .success(function (response) {
+        $('#linkCampaignsModal').modal('hide')
+        Swal.fire({
+            title: 'Campaign Group Created!',
+            text: 'Would you like to view the campaign group now?',
+            type: 'success',
+            showCancelButton: true,
+            confirmButtonText: 'View Group',
+            cancelButtonText: 'Stay Here'
+        }).then(function (result) {
+            if (result.value) window.location.href = '/campaign-groups/' + response.id
+        })
+    })
+    .error(function (res) {
+        linkModalFlash((res.responseJSON && res.responseJSON.message) || 'Error creating group', 'danger')
+    })
+}
+
+// Flash message inside link modal
+function linkModalFlash(msg, type) {
+    $('#link-modal-flashes').html(
+        '<div class="alert alert-' + type + '">' +
+        '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+        '<i class="fa fa-exclamation-circle"></i> ' + msg + '</div>'
+    )
+}

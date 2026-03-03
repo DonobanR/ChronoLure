@@ -53,6 +53,8 @@ scripts = function () {
     return gulp.src([
             app_directory + 'autocomplete.js',
             app_directory + 'campaign_results.js',
+            app_directory + 'campaign_groups.js',
+            app_directory + 'campaign_group_results.js',
             app_directory + 'campaigns.js',
             app_directory + 'dashboard.js',
             app_directory + 'groups.js',
@@ -63,7 +65,8 @@ scripts = function () {
             app_directory + 'gophish.js',
             app_directory + 'users.js',
             app_directory + 'webhooks.js',
-            app_directory + 'passwords.js'
+            app_directory + 'passwords.js',
+            app_directory + 'trash.js'
         ])
         .pipe(rename({
             suffix: '.min'
