@@ -23,6 +23,16 @@
             <button id="refresh_btn" type="button" class="btn btn-blue" onclick="refresh()">
                 <i class="fa fa-refresh"></i> Refresh
             </button>
+            <div class="btn-group">
+                <button type="button" class="btn btn-success dropdown-toggle" data-toggle="dropdown">
+                    <i class="fa fa-download"></i> Export <span class="caret"></span>
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a href="#" onclick="exportGroupSummary(); return false;"><i class="fa fa-bar-chart"></i> Summary (CSV)</a></li>
+                    <li><a href="#" onclick="exportGroupJourney('all'); return false;"><i class="fa fa-users"></i> Full Journey - Pivot (CSV)</a></li>
+                    <li><a href="#" onclick="exportGroupJourney('filtered'); return false;"><i class="fa fa-filter"></i> Filtered Journey - Pivot (CSV)</a></li>
+                </ul>
+            </div>
         </div>
         <br />
         

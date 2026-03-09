@@ -607,6 +607,147 @@ function deleteCampaignGroup() {
     })
 }
 
+// ── Export functions ─────────────────────────────────────────────────────────
+
+// Exports aggregated group stats as CSV
+function exportGroupSummary() {
+    if (!stats || !campaignGroup) return
+    var rows = [
+        ['Group Name', campaignGroup.name],
+        [''],
+        ['Metric', 'Value'],
+        ['Total Recipients', stats.total_recipients],
+        ['Emails Sent',      stats.sent],
+        ['Emails Opened',    stats.opened],
+        ['Clicked Link',     stats.clicked],
+        ['Submitted Data',   stats.submitted_data],
+        ['Email Reported',   stats.email_reported]
+    ]
+    if (stats.calendar_opened)  rows.push(['Calendar Opened',  stats.calendar_opened])
+    if (stats.calendar_clicked) rows.push(['Calendar Clicked', stats.calendar_clicked])
+
+    var csvString = Papa.unparse(rows, {escapeFormulae: true})
+    downloadCSV(csvString, campaignGroup.name + ' - Summary.csv')
+}
+
+// Exports recipient journey as a pivot CSV (one boolean column per event per campaign)
+// scope: 'all' | 'filtered'
+function exportGroupJourney(scope) {
+    if (!_allJourneys.length || !_orderedCampaigns.length) {
+        errorFlash('No journey data to export yet')
+        return
+    }
+
+    var journeys = scope === 'filtered'
+        ? getFilteredJourneys()
+        : _allJourneys
+
+    if (!journeys || journeys.length === 0) {
+        errorFlash('No recipients match the current filter')
+        return
+    }
+
+    // Event columns to show per campaign (in order)
+    var EVENT_COLS = [
+        {key: 'Email Sent',      label: 'Sent'},
+        {key: 'Email Opened',    label: 'Opened'},
+        {key: 'Clicked Link',    label: 'Clicked'},
+        {key: 'Submitted Data',  label: 'Submitted'},
+        {key: 'Email Reported',  label: 'Reported'},
+        {key: 'Calendar Opened', label: 'Cal. Opened'},
+        {key: 'Calendar Clicked',label: 'Cal. Clicked'}
+    ]
+
+    // Row 1: campaign name spanning its columns (merged visually in Excel via repeat)
+    // Row 2: individual column labels
+    var headerRow1 = ['Email']
+    var headerRow2 = ['']
+    _orderedCampaigns.forEach(function (c) {
+        var shortName = c.name.length > 30 ? c.name.substring(0, 30) + '…' : c.name
+        EVENT_COLS.forEach(function (ev) {
+            headerRow1.push(shortName)
+            headerRow2.push(ev.label)
+        })
+        headerRow1.push(shortName)
+        headerRow2.push('Captured Data')
+    })
+
+    var rows = [headerRow1, headerRow2]
+
+    journeys.forEach(function (journey) {
+        var resultByCampaign = {}
+        ;(journey.campaign_results || []).forEach(function (r) {
+            resultByCampaign[r.campaign_id] = r
+        })
+
+        var row = [journey.email]
+        _orderedCampaigns.forEach(function (c) {
+            var r = resultByCampaign[c.id]
+            if (!r) {
+                EVENT_COLS.forEach(function () { row.push('') })
+                row.push('')
+                return
+            }
+            var eventSet = {}
+            ;(r.events || []).forEach(function (ev) { eventSet[ev.message] = true })
+
+            EVENT_COLS.forEach(function (ev) {
+                row.push(eventSet[ev.key] ? '✓' : '')
+            })
+
+            // Captured form data — one "key: value" per line inside the cell
+            var fd = r.form_data || {}
+            var fdStr = Object.keys(fd)
+                .filter(function (k) { return k !== 'rid' })
+                .map(function (k) {
+                    var v = Array.isArray(fd[k]) ? fd[k].join(', ') : fd[k]
+                    return k + ': ' + v
+                }).join('\n')
+            row.push(fdStr || '')
+        })
+        rows.push(row)
+    })
+
+    var suffix = scope === 'filtered' ? ' - Filtered' : ' - Full'
+    var csvString = Papa.unparse(rows, {escapeFormulae: true})
+    downloadCSV(csvString, campaignGroup.name + suffix + '.csv')
+}
+
+// Returns the journeys currently shown in the filtered tab
+function getFilteredJourneys() {
+    var rules = []
+    $('.filter-rule').each(function () {
+        var $rule = $(this)
+        var campaignId = parseInt($rule.find('.filter-campaign-sel').val())
+        if (!campaignId) return
+        var events = []
+        $rule.find('.filter-event-cb:checked').each(function () { events.push($(this).val()) })
+        var untilDate = $rule.find('.filter-until-date').val()
+        rules.push({campaignId: campaignId, events: events, untilDate: untilDate})
+    })
+    if (rules.length === 0) return _allJourneys
+    return _allJourneys.filter(function (journey) {
+        return rules.every(function (rule) { return journeyMatchesRule(journey, rule) })
+    })
+}
+
+// Triggers a CSV file download in the browser
+function downloadCSV(csvString, filename) {
+    var blob = new Blob([csvString], {type: 'text/csv;charset=utf-8;'})
+    if (navigator.msSaveBlob) {
+        navigator.msSaveBlob(blob, filename)
+    } else {
+        var url = window.URL.createObjectURL(blob)
+        var a = document.createElement('a')
+        a.href = url
+        a.setAttribute('download', filename)
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+    }
+}
+
 // Refresh data
 function refresh() {
     $('#refresh_btn').prop('disabled', true)
