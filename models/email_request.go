@@ -104,7 +104,10 @@ func (s *EmailRequest) Generate(msg *gomail.Message) error {
 	if err != nil {
 		return err
 	}
-	msg.SetAddressHeader("From", f.Address, f.Name)
+	// Use Q-encoding (=?utf-8?q?...?=) instead of gomail's default B-encoding
+	// so that old Outlook clients display the sender name correctly instead of
+	// showing the raw "=?utf-8?B?...?=" string.
+	msg.SetHeader("From", formatFromHeader(f.Address, f.Name))
 
 	ptx, err := NewPhishingTemplateContext(s, s.BaseRecipient, s.RId)
 	if err != nil {

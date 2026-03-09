@@ -197,7 +197,10 @@ func (m *MailLog) Generate(msg *gomail.Message) error {
 			return err
 		}
 	}
-	msg.SetAddressHeader("From", f.Address, f.Name)
+	// Use Q-encoding (=?utf-8?q?...?=) instead of gomail's default B-encoding
+	// so that old Outlook clients display the sender name correctly instead of
+	// showing the raw "=?utf-8?B?...?=" string.
+	msg.SetHeader("From", formatFromHeader(f.Address, f.Name))
 
 	ptx, err := NewPhishingTemplateContext(c, r.BaseRecipient, r.RId)
 	if err != nil {
@@ -281,7 +284,10 @@ func (m *MailLog) generateCalendarEmail(msg *gomail.Message, r *Result, c *Campa
 			return err
 		}
 	}
-	msg.SetAddressHeader("From", f.Address, f.Name)
+	// Use Q-encoding (=?utf-8?q?...?=) instead of gomail's default B-encoding
+	// so that old Outlook clients display the sender name correctly instead of
+	// showing the raw "=?utf-8?B?...?=" string.
+	msg.SetHeader("From", formatFromHeader(f.Address, f.Name))
 
 	ptx, err := NewPhishingTemplateContext(c, r.BaseRecipient, r.RId)
 	if err != nil {
