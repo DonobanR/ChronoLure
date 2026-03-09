@@ -2,20 +2,26 @@ package models
 
 import (
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 )
 
-// formatFromHeader formats a "From" header value with maximum compatibility for
-// ALL email clients, including old Outlook (2007/2010/2013).
+// formatFromHeader formats a "From" header value with maximum compatibility:
 //
-// Root cause of the bug: gomail encodes display names that contain non-ASCII
-// characters using RFC 2047 encoded-words (=?utf-8?B?...?= or =?utf-8?q?...?=).
-// Old Outlook versions do NOT decode those encoded-words in the From field and
-// show the raw string instead of the actual sender name.
+//   - Old Outlook (2007-2013): does NOT decode RFC 2047 encoded-words in the
+//     From field, showing raw "=?utf-8?B?...?=" strings instead of the name.
 //
-// Fix: send the display name as raw UTF-8 bytes (RFC 6532 / SMTPUTF8).
-// Every modern SMTP relay (Exchange, Gmail, SendGrid, etc.) and every mail
-// client — including old Outlook — renders raw UTF-8 display names correctly
-// without any decoding step.
+//   - Strict SMTP servers (e.g. some Latin-American MTAs): reject raw UTF-8
+//     bytes in headers with "554 Domain contains illegal character" when the
+//     SMTPUTF8 extension is not negotiated.
+//
+// Solution: transliterate the display name to pure ASCII (e.g. "Comunicación"
+// → "Comunicacion") before building the header.  This produces headers that
+// are accepted by every SMTP server and rendered correctly by every email
+// client without any decoding step.
 //
 // Usage:
 //
@@ -25,14 +31,50 @@ func formatFromHeader(address, name string) string {
 		return address
 	}
 
+	asciiName := toASCII(name)
+
 	// If the name contains RFC 5322 special characters it must be wrapped in a
-	// quoted-string.  All other names (including UTF-8) are sent as plain text —
-	// no RFC 2047 encoding applied.
-	if hasMailSpecials(name) {
-		safe := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(name)
+	// quoted-string.
+	if hasMailSpecials(asciiName) {
+		safe := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(asciiName)
 		return `"` + safe + `" <` + address + `>`
 	}
-	return name + " <" + address + ">"
+	return asciiName + " <" + address + ">"
+}
+
+// toASCII converts a UTF-8 string to its closest ASCII representation by:
+//  1. Decomposing characters to NFD form (e.g. "ó" → "o" + combining accent)
+//  2. Removing all combining diacritical marks (Unicode category Mn)
+//  3. Dropping any remaining non-ASCII bytes
+//
+// Examples: "Comunicación!" → "Comunicacion!"
+//
+//	"José Ñoño"    → "Jose Nono"
+func toASCII(s string) string {
+	t := transform.Chain(
+		norm.NFD,
+		runes.Remove(runes.In(unicode.Mn)),
+		norm.NFC,
+	)
+	result, _, err := transform.String(t, s)
+	if err != nil {
+		// Fallback: strip all non-ASCII bytes manually
+		var b strings.Builder
+		for _, r := range s {
+			if r < 128 {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+	// Remove any leftover non-ASCII bytes that NFD couldn't decompose
+	var b strings.Builder
+	for _, r := range result {
+		if r < 128 {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // hasMailSpecials reports whether s contains any RFC 5322 "special" characters
