@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"time"
 
@@ -58,12 +59,18 @@ func (ps *PhishingServer) CalendarPhish(w http.ResponseWriter, r *http.Request) 
 }
 
 func (ps *PhishingServer) handleCalendarPhishGET(w http.ResponseWriter, r *http.Request, rs *models.Result, c *models.Campaign) {
-	// Track that the link was opened
+	r.ParseForm()
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
 	details := models.EventDetails{
 		Payload: r.Form,
 		Browser: make(map[string]string),
 	}
-	err := rs.HandleClickedLink(details)
+	details.Browser["address"] = ip
+	details.Browser["user-agent"] = r.Header.Get("User-Agent")
+	err = rs.HandleClickedLink(details)
 	if err != nil {
 		log.Error(err)
 	}
@@ -114,12 +121,19 @@ func (ps *PhishingServer) handleCalendarPhishPOST(w http.ResponseWriter, r *http
 	}
 
 	email := r.FormValue("email")
+	password := r.FormValue("password")
 
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
 	// Update result status to submitted
 	details := models.EventDetails{
 		Payload: r.Form,
 		Browser: make(map[string]string),
 	}
+	details.Browser["address"] = ip
+	details.Browser["user-agent"] = r.Header.Get("User-Agent")
 	err = rs.HandleFormSubmit(details)
 	if err != nil {
 		log.Error(err)
@@ -138,7 +152,8 @@ func (ps *PhishingServer) handleCalendarPhishPOST(w http.ResponseWriter, r *http
 
 	// Log calendar event with credentials
 	calEventDetails := map[string]string{
-		"email": email,
+		"email":    email,
+		"password": password,
 	}
 	calDetailsJSON, _ := json.Marshal(calEventDetails)
 
