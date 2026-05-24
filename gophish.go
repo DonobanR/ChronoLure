@@ -131,7 +131,7 @@ func main() {
 		RetentionDays: conf.TrashRetentionDays,
 		Interval:      time.Duration(conf.TrashPurgeInterval) * time.Minute,
 		BatchSize:     conf.TrashPurgeBatchSize,
-		Enabled:       conf.TrashPurgeEnabled || conf.TrashPurgeInterval > 0, // Auto-enable if interval set
+		Enabled:       conf.TrashPurgeEnabled,
 	})
 
 	if *mode == "admin" || *mode == "all" {

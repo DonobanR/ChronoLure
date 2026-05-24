@@ -190,32 +190,57 @@ window.deleteCampaign = function(idx) {
         confirmButtonText: "Move to Trash",
         confirmButtonColor: "#428bca",
         reverseButtons: true,
-        allowOutsideClick: false,
-        preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.campaignId.delete(campaigns[idx].id)
-                    .success(function (msg) {
-                        resolve()
-                    })
-                    .error(function (data) {
-                        reject(data.responseJSON.message)
-                    })
-            })
-        }
+        allowOutsideClick: false
     }).then(function (result) {
-        if (result.value){
+        if (result.value) {
+            deleteCampaignRequest(idx, false)
+        }
+    })
+}
+
+function deleteCampaignRequest(idx, acknowledgeCampaignGroups) {
+    api.campaignId.delete(campaigns[idx].id, {
+        acknowledge_campaign_groups: acknowledgeCampaignGroups
+    })
+        .success(function () {
             Swal.fire({
                 title: 'Campaign Moved to Trash!',
                 html: 'The campaign "<strong>' + escapeHtml(campaigns[idx].name) + '</strong>" has been moved to trash.<br>' +
-                      '<small class="text-muted">You can restore it from the <a href="/campaigns/trash">Trash page</a>.</small>',
+                    '<small class="text-muted">You can restore it from the <a href="/campaigns/trash">Trash page</a>.</small>',
                 type: 'success',
                 confirmButtonText: 'OK'
-            });
-        }
-        $('button:contains("OK")').on('click', function () {
-            location.reload()
+            })
+            $('button:contains("OK")').on('click', function () {
+                location.reload()
+            })
         })
-    })
+        .error(function (data) {
+            var response = data.responseJSON || {}
+            if (data.status === 409 && response.requires_acknowledgement) {
+                var names = (response.campaign_groups || []).map(function (group) {
+                    return escapeHtml(group.name)
+                }).join(', ')
+                var count = response.campaign_groups_count || 0
+                var groupWord = count === 1 ? 'Campaign Group' : 'Campaign Groups'
+                Swal.fire({
+                    title: "Campaign Group Link",
+                    html: "This campaign belongs to " + count + " " + groupWord + ": <strong>" + names + "</strong>. Moving it to Trash may affect the group view and aggregated results. Do you want to continue?",
+                    type: "warning",
+                    animation: false,
+                    showCancelButton: true,
+                    confirmButtonText: "Move to Trash",
+                    confirmButtonColor: "#d9534f",
+                    reverseButtons: true,
+                    allowOutsideClick: false
+                }).then(function (result) {
+                    if (result.value) {
+                        deleteCampaignRequest(idx, true)
+                    }
+                })
+                return
+            }
+            errorFlash(response.message || "Error moving campaign to trash")
+        })
 }
 
 function setupOptions() {
@@ -512,4 +537,3 @@ $(document).ready(function () {
         toggleCampaignType();
     })
 })
-

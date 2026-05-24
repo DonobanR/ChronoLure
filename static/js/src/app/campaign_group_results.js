@@ -180,22 +180,29 @@ function renderCampaignGroup() {
     
     campaignGroup.campaigns.forEach(function(cgc) {
         var campaign = cgc.campaign
+        if (!campaign || !campaign.id) {
+            return
+        }
         var statusLabel = getStatusLabel(campaign.status)
         var campaignType = campaign.campaign_type || 'email'
+        var inTrash = !!campaign.deleted_at
+        var nameHtml = inTrash ?
+            escapeHtml(campaign.name) + ' <span class="label label-warning">In Trash</span>' :
+            '<a href="/campaigns/' + campaign.id + '">' + escapeHtml(campaign.name) + '</a>'
+        var actionHtml = inTrash ?
+            '<a href="/trash?type=campaign" class="btn btn-sm btn-warning">' +
+            '<i class="fa fa-trash"></i> View in Trash</a>' :
+            '<a href="/campaigns/' + campaign.id + '" class="btn btn-sm btn-primary">' +
+            '<i class="fa fa-bar-chart"></i> View</a>'
         
         var row = $('<tr>')
         row.append($('<td>').text(cgc.order_index + 1))
-        row.append($('<td>').html('<a href="/campaigns/' + campaign.id + '">' + 
-            escapeHtml(campaign.name) + '</a>'))
+        row.append($('<td>').html(nameHtml))
         row.append($('<td>').text(campaignType))
         row.append($('<td>').html(statusLabel))
-        row.append($('<td>').text(moment(campaign.created_date).format('MMMM Do YYYY, h:mm a')))
-        row.append($('<td>').text(campaign.completed_date ? 
-            moment(campaign.completed_date).format('MMMM Do YYYY, h:mm a') : '-'))
-        row.append($('<td>').html(
-            '<a href="/campaigns/' + campaign.id + '" class="btn btn-sm btn-primary">' +
-            '<i class="fa fa-bar-chart"></i> View</a>'
-        ))
+        row.append($('<td>').text(formatCampaignGroupDate(campaign.created_date)))
+        row.append($('<td>').text(formatCampaignGroupDate(campaign.completed_date)))
+        row.append($('<td>').html(actionHtml))
         
         tbody.append(row)
     })
@@ -204,6 +211,13 @@ function renderCampaignGroup() {
     if (campaignGroup.archived) {
         $('#archive_button').html('<i class="fa fa-folder-open"></i> Unarchive')
     }
+}
+
+function formatCampaignGroupDate(value) {
+    if (!value || String(value).indexOf('0001-01-01') === 0) {
+        return '-'
+    }
+    return moment(value).format('MMMM Do YYYY, h:mm a')
 }
 
 // Render aggregated statistics

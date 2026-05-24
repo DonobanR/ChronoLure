@@ -135,31 +135,55 @@ function deleteCampaign() {
         confirmButtonText: "Delete Campaign",
         confirmButtonColor: "#428bca",
         reverseButtons: true,
-        allowOutsideClick: false,
-        showLoaderOnConfirm: true,
-        preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.campaignId.delete(campaign.id)
-                    .success(function (msg) {
-                        resolve()
-                    })
-                    .error(function (data) {
-                        reject(data.responseJSON.message)
-                    })
-            })
-        }
+        allowOutsideClick: false
     }).then(function (result) {
-        if(result.value){
+        if (result.value) {
+            deleteCampaignRequest(false)
+        }
+    })
+}
+
+function deleteCampaignRequest(acknowledgeCampaignGroups) {
+    api.campaignId.delete(campaign.id, {
+        acknowledge_campaign_groups: acknowledgeCampaignGroups
+    })
+        .success(function () {
             Swal.fire(
                 'Campaign Deleted!',
                 'This campaign has been deleted!',
                 'success'
-            );
-        }
-        $('button:contains("OK")').on('click', function () {
-            location.href = '/campaigns'
+            )
+            $('button:contains("OK")').on('click', function () {
+                location.href = '/campaigns'
+            })
         })
-    })
+        .error(function (data) {
+            var response = data.responseJSON || {}
+            if (data.status === 409 && response.requires_acknowledgement) {
+                var names = (response.campaign_groups || []).map(function (group) {
+                    return escapeHtml(group.name)
+                }).join(', ')
+                var count = response.campaign_groups_count || 0
+                var groupWord = count === 1 ? 'Campaign Group' : 'Campaign Groups'
+                Swal.fire({
+                    title: "Campaign Group Link",
+                    html: "This campaign belongs to " + count + " " + groupWord + ": <strong>" + names + "</strong>. Moving it to Trash may affect the group view and aggregated results. Do you want to continue?",
+                    type: "warning",
+                    animation: false,
+                    showCancelButton: true,
+                    confirmButtonText: "Move to Trash",
+                    confirmButtonColor: "#d9534f",
+                    reverseButtons: true,
+                    allowOutsideClick: false
+                }).then(function (result) {
+                    if (result.value) {
+                        deleteCampaignRequest(true)
+                    }
+                })
+                return
+            }
+            errorFlash(response.message || "Error deleting campaign")
+        })
 }
 
 // Completes a campaign after prompting the user

@@ -101,11 +101,16 @@ func (j *TrashTTLJob) Stop() {
 
 // RunOnce executes a single purge cycle (useful for testing and manual triggers)
 func (j *TrashTTLJob) RunOnce(ctx context.Context) error {
+	if !j.enabled {
+		log.Info("Trash TTL job is disabled, skipping run")
+		return nil
+	}
+
 	startTime := time.Now()
-	
+
 	// Calculate cutoff time
 	cutoff := time.Now().Add(-time.Duration(j.retentionDays) * 24 * time.Hour)
-	
+
 	log.Debugf("Trash TTL: Looking for campaigns deleted before %s", cutoff.Format(time.RFC3339))
 
 	// Get candidates for purge

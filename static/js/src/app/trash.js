@@ -237,7 +237,9 @@
         var $btn = $('#confirm-purge');
         $btn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Deleting…');
 
-        api.globalTrash.purge(item.type, item.id)
+        api.globalTrash.purge(item.type, item.id, {
+            confirmation: $('#purge-confirm-input').val()
+        })
             .success(function () {
                 $('#purgeModal').modal('hide');
                 Swal.fire({

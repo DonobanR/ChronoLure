@@ -42,23 +42,23 @@ type CampaignGroupSummary struct {
 
 // CampaignGroupStats represents aggregated telemetry for a campaign group
 type CampaignGroupStats struct {
-	TotalRecipients int64                      `json:"total_recipients"`
-	EmailsSent      int64                      `json:"sent"`
-	OpenedEmail     int64                      `json:"opened"`
-	ClickedLink     int64                      `json:"clicked"`
-	SubmittedData   int64                      `json:"submitted_data"`
-	EmailReported   int64                      `json:"email_reported"`
-	Error           int64                      `json:"error"`
+	TotalRecipients int64 `json:"total_recipients"`
+	EmailsSent      int64 `json:"sent"`
+	OpenedEmail     int64 `json:"opened"`
+	ClickedLink     int64 `json:"clicked"`
+	SubmittedData   int64 `json:"submitted_data"`
+	EmailReported   int64 `json:"email_reported"`
+	Error           int64 `json:"error"`
 	// Calendar-specific events (if applicable)
-	CalendarOpened  int64                      `json:"calendar_opened,omitempty"`
-	CalendarClicked int64                      `json:"calendar_clicked,omitempty"`
+	CalendarOpened  int64 `json:"calendar_opened,omitempty"`
+	CalendarClicked int64 `json:"calendar_clicked,omitempty"`
 	// Per-recipient journey tracking
-	RecipientJourneys []RecipientJourney       `json:"recipient_journeys,omitempty"`
+	RecipientJourneys []RecipientJourney `json:"recipient_journeys,omitempty"`
 }
 
 // RecipientJourney tracks the progress of a single recipient across multiple campaigns in a group
 type RecipientJourney struct {
-	Email           string                   `json:"email"`
+	Email           string                    `json:"email"`
 	CampaignResults []CampaignRecipientResult `json:"campaign_results"`
 }
 
@@ -78,13 +78,18 @@ type CampaignRecipientResult struct {
 	FormData     map[string][]string `json:"form_data,omitempty"`
 }
 
+type CampaignGroupReference struct {
+	Id   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 // Validation errors
 var (
-	ErrCampaignGroupNameEmpty     = errors.New("Campaign group name is required")
-	ErrCampaignGroupNotFound      = errors.New("Campaign group not found")
-	ErrNoCampaignsInGroup         = errors.New("At least one campaign is required")
-	ErrDuplicateCampaignInGroup   = errors.New("Campaign already exists in this group")
-	ErrInvalidCampaignGroupOwner  = errors.New("One or more campaigns do not belong to this user")
+	ErrCampaignGroupNameEmpty    = errors.New("Campaign group name is required")
+	ErrCampaignGroupNotFound     = errors.New("Campaign group not found")
+	ErrNoCampaignsInGroup        = errors.New("At least one campaign is required")
+	ErrDuplicateCampaignInGroup  = errors.New("Campaign already exists in this group")
+	ErrInvalidCampaignGroupOwner = errors.New("One or more campaigns do not belong to this user")
 )
 
 // GetCampaignGroups returns the active (non-deleted) campaign groups owned by the given user
@@ -97,10 +102,7 @@ func GetCampaignGroups(uid int64) ([]CampaignGroup, error) {
 	}
 	// Load campaigns for each group
 	for i := range cgs {
-		err = db.Where("group_id = ?", cgs[i].Id).
-			Order("order_index ASC").
-			Preload("Campaign").
-			Find(&cgs[i].Campaigns).Error
+		err = loadCampaignGroupCampaigns(&cgs[i], false)
 		if err != nil {
 			log.Error(err)
 		}
@@ -116,23 +118,73 @@ func GetCampaignGroup(id int64, uid int64) (CampaignGroup, error) {
 		log.Error(err)
 		return cg, err
 	}
-	// Load campaigns with full campaign details
-	err = db.Where("group_id = ?", cg.Id).
-		Order("order_index ASC").
-		Preload("Campaign").
-		Preload("Campaign.Results").
-		Preload("Campaign.Events").
-		Find(&cg.Campaigns).Error
+	// Load campaigns with full campaign details, including soft-deleted
+	// campaigns so linked campaign rows never render a zero-value Campaign.
+	err = loadCampaignGroupCampaigns(&cg, true)
 	if err != nil {
 		log.Error(err)
 	}
 	return cg, nil
 }
 
+func loadCampaignGroupCampaigns(cg *CampaignGroup, includeDetails bool) error {
+	links := []CampaignGroupCampaign{}
+	err := db.Where("group_id = ?", cg.Id).
+		Order("order_index ASC").
+		Find(&links).Error
+	if err != nil {
+		return err
+	}
+
+	cg.Campaigns = []CampaignGroupCampaign{}
+	for i := range links {
+		campaign := Campaign{}
+		query := db.Unscoped().Where("id = ? AND user_id = ?", links[i].CampaignId, cg.UserId)
+		if includeDetails {
+			query = query.Preload("Results").Preload("Events")
+		}
+		if err := query.First(&campaign).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				log.Warnf("Skipping orphaned campaign group link group=%d campaign=%d", cg.Id, links[i].CampaignId)
+				continue
+			}
+			return err
+		}
+		links[i].Campaign = campaign
+		cg.Campaigns = append(cg.Campaigns, links[i])
+	}
+	return nil
+}
+
+func GetCampaignGroupsForCampaign(campaignID int64, uid int64) ([]CampaignGroupReference, error) {
+	groups := []CampaignGroupReference{}
+	rows, err := db.Table("campaign_group_campaigns").
+		Select("campaign_groups.id, campaign_groups.name").
+		Joins("JOIN campaign_groups ON campaign_groups.id = campaign_group_campaigns.group_id").
+		Where("campaign_group_campaigns.campaign_id = ? AND campaign_groups.user_id = ? AND campaign_groups.deleted_at IS NULL", campaignID, uid).
+		Order("campaign_groups.name ASC").
+		Rows()
+	if err != nil {
+		log.Error(err)
+		return groups, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		group := CampaignGroupReference{}
+		if err := rows.Scan(&group.Id, &group.Name); err != nil {
+			log.Error(err)
+			return groups, err
+		}
+		groups = append(groups, group)
+	}
+	return groups, nil
+}
+
 // GetCampaignGroupSummaries returns summaries of campaign groups for a user
 func GetCampaignGroupSummaries(uid int64) ([]CampaignGroupSummary, error) {
 	summaries := []CampaignGroupSummary{}
-	
+
 	rows, err := db.Table("campaign_groups").
 		Select("campaign_groups.id, campaign_groups.name, campaign_groups.created_date, campaign_groups.archived, COUNT(campaign_group_campaigns.id) as campaign_count").
 		Joins("LEFT JOIN campaign_group_campaigns ON campaign_groups.id = campaign_group_campaigns.group_id").
@@ -140,13 +192,13 @@ func GetCampaignGroupSummaries(uid int64) ([]CampaignGroupSummary, error) {
 		Group("campaign_groups.id").
 		Order("campaign_groups.created_date DESC").
 		Rows()
-	
+
 	if err != nil {
 		log.Error(err)
 		return summaries, err
 	}
 	defer rows.Close()
-	
+
 	for rows.Next() {
 		summary := CampaignGroupSummary{}
 		err := rows.Scan(&summary.Id, &summary.Name, &summary.CreatedDate, &summary.Archived, &summary.CampaignCount)
@@ -156,7 +208,7 @@ func GetCampaignGroupSummaries(uid int64) ([]CampaignGroupSummary, error) {
 		}
 		summaries = append(summaries, summary)
 	}
-	
+
 	return summaries, nil
 }
 
@@ -169,17 +221,17 @@ func PostCampaignGroup(cg *CampaignGroup, uid int64) error {
 	if len(cg.Campaigns) == 0 {
 		return ErrNoCampaignsInGroup
 	}
-	
+
 	// Set metadata
 	cg.UserId = uid
 	cg.CreatedDate = time.Now().UTC()
-	
+
 	// Verify all campaigns belong to the user
 	campaignIds := make([]int64, len(cg.Campaigns))
 	for i, cgc := range cg.Campaigns {
 		campaignIds[i] = cgc.CampaignId
 	}
-	
+
 	var count int
 	err := db.Table("campaigns").
 		Where("id IN (?) AND user_id = ? AND deleted_at IS NULL", campaignIds, uid).
@@ -191,10 +243,10 @@ func PostCampaignGroup(cg *CampaignGroup, uid int64) error {
 	if count != len(campaignIds) {
 		return ErrInvalidCampaignGroupOwner
 	}
-	
+
 	// Start transaction
 	tx := db.Begin()
-	
+
 	// Create the group
 	err = tx.Save(cg).Error
 	if err != nil {
@@ -202,7 +254,7 @@ func PostCampaignGroup(cg *CampaignGroup, uid int64) error {
 		log.Error(err)
 		return err
 	}
-	
+
 	// Create the campaign associations
 	for i := range cg.Campaigns {
 		cg.Campaigns[i].GroupId = cg.Id
@@ -214,14 +266,14 @@ func PostCampaignGroup(cg *CampaignGroup, uid int64) error {
 			return err
 		}
 	}
-	
+
 	// Commit
 	err = tx.Commit().Error
 	if err != nil {
 		log.Error(err)
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -235,15 +287,15 @@ func PutCampaignGroup(cg *CampaignGroup, uid int64) error {
 		}
 		return err
 	}
-	
+
 	// Validate
 	if cg.Name == "" {
 		return ErrCampaignGroupNameEmpty
 	}
-	
+
 	// Start transaction
 	tx := db.Begin()
-	
+
 	// Update basic fields
 	existing.Name = cg.Name
 	existing.Archived = cg.Archived
@@ -253,7 +305,7 @@ func PutCampaignGroup(cg *CampaignGroup, uid int64) error {
 		log.Error(err)
 		return err
 	}
-	
+
 	// Update campaigns if provided
 	if len(cg.Campaigns) > 0 {
 		// Verify all campaigns belong to the user
@@ -261,7 +313,7 @@ func PutCampaignGroup(cg *CampaignGroup, uid int64) error {
 		for i, cgc := range cg.Campaigns {
 			campaignIds[i] = cgc.CampaignId
 		}
-		
+
 		var count int
 		err := tx.Table("campaigns").
 			Where("id IN (?) AND user_id = ? AND deleted_at IS NULL", campaignIds, uid).
@@ -275,7 +327,7 @@ func PutCampaignGroup(cg *CampaignGroup, uid int64) error {
 			tx.Rollback()
 			return ErrInvalidCampaignGroupOwner
 		}
-		
+
 		// Delete existing associations
 		err = tx.Where("group_id = ?", cg.Id).Delete(&CampaignGroupCampaign{}).Error
 		if err != nil {
@@ -283,7 +335,7 @@ func PutCampaignGroup(cg *CampaignGroup, uid int64) error {
 			log.Error(err)
 			return err
 		}
-		
+
 		// Create new associations
 		for i := range cg.Campaigns {
 			cg.Campaigns[i].GroupId = cg.Id
@@ -296,14 +348,14 @@ func PutCampaignGroup(cg *CampaignGroup, uid int64) error {
 			}
 		}
 	}
-	
+
 	// Commit
 	err = tx.Commit().Error
 	if err != nil {
 		log.Error(err)
 		return err
 	}
-	
+
 	return nil
 }
 

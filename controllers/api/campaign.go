@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -77,9 +78,33 @@ func (as *Server) Campaign(w http.ResponseWriter, r *http.Request) {
 		// Soft delete - move to trash
 		// Read optional reason from body
 		var req struct {
-			Reason string `json:"reason"`
+			Reason                    string `json:"reason"`
+			AcknowledgeCampaignGroups bool   `json:"acknowledge_campaign_groups"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			JSONResponse(w, models.Response{Success: false, Message: "Invalid JSON structure"}, http.StatusBadRequest)
+			return
+		}
+
+		campaignGroups, err := models.GetCampaignGroupsForCampaign(id, ctx.Get(r, "user_id").(int64))
+		if err != nil {
+			log.Errorf("Error checking campaign group links for campaign %d: %v", id, err)
+			JSONResponse(w, models.Response{Success: false, Message: "Error checking campaign group links"}, http.StatusInternalServerError)
+			return
+		}
+		if len(campaignGroups) > 0 && !req.AcknowledgeCampaignGroups {
+			JSONResponse(w, map[string]interface{}{
+				"success":                    false,
+				"message":                    campaignGroupTrashWarningMessage(c.Name, campaignGroups),
+				"campaign_id":                c.Id,
+				"campaign_name":              c.Name,
+				"campaign_groups_count":      len(campaignGroups),
+				"campaign_groups":            campaignGroups,
+				"requires_acknowledgement":   true,
+				"acknowledgement_field_name": "acknowledge_campaign_groups",
+			}, http.StatusConflict)
+			return
+		}
 
 		err = models.SoftDeleteCampaign(id, ctx.Get(r, "user_id").(int64), req.Reason)
 		if err != nil {
@@ -97,6 +122,21 @@ func (as *Server) Campaign(w http.ResponseWriter, r *http.Request) {
 		}
 		JSONResponse(w, models.Response{Success: true, Message: "Campaign moved to trash"}, http.StatusOK)
 	}
+}
+
+func campaignGroupTrashWarningMessage(campaignName string, groups []models.CampaignGroupReference) string {
+	groupWord := "Campaign Group"
+	if len(groups) != 1 {
+		groupWord = "Campaign Groups"
+	}
+	names := ""
+	for i, group := range groups {
+		if i > 0 {
+			names += ", "
+		}
+		names += group.Name
+	}
+	return "This campaign belongs to " + strconv.Itoa(len(groups)) + " " + groupWord + ": " + names + ". Moving it to Trash may affect the group view and aggregated results. Do you want to continue?"
 }
 
 // CampaignResults returns just the results for a given campaign to

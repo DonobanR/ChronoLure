@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -95,6 +96,11 @@ func (as *Server) GlobalTrashPurge(w http.ResponseWriter, r *http.Request) {
 
 	userID := ctx.Get(r, "user_id").(int64)
 
+	if itemType != models.TrashTypeCampaign && itemType != models.TrashTypeCampaignGroup {
+		JSONResponse(w, models.Response{Success: false, Message: "unknown trash type: " + itemType}, http.StatusBadRequest)
+		return
+	}
+
 	// Determine admin status (required for campaign purge permission check)
 	user, err := models.GetUser(userID)
 	if err != nil {
@@ -104,17 +110,52 @@ func (as *Server) GlobalTrashPurge(w http.ResponseWriter, r *http.Request) {
 	}
 	isAdmin := user.Role.Slug == "admin"
 
+	if itemType == models.TrashTypeCampaign {
+		var req struct {
+			Confirmation string `json:"confirmation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			JSONResponse(w, models.Response{Success: false, Message: "Invalid request body"}, http.StatusBadRequest)
+			return
+		}
+		if req.Confirmation == "" {
+			JSONResponse(w, models.Response{Success: false, Message: "Confirmation is required"}, http.StatusBadRequest)
+			return
+		}
+
+		campaign, err := models.GetTrashedCampaignByID(id, userID)
+		if err != nil {
+			if err == models.ErrCampaignNotFound {
+				if _, activeErr := models.GetCampaign(id, userID); activeErr == nil {
+					JSONResponse(w, models.Response{Success: false, Message: "Campaign is not in trash"}, http.StatusBadRequest)
+					return
+				}
+				JSONResponse(w, models.Response{Success: false, Message: "Campaign not found"}, http.StatusNotFound)
+				return
+			}
+			log.Errorf("GlobalTrashPurge: GetTrashedCampaignByID %d: %v", id, err)
+			JSONResponse(w, models.Response{Success: false, Message: "Error validating campaign"}, http.StatusInternalServerError)
+			return
+		}
+		if req.Confirmation != campaign.Name {
+			JSONResponse(w, models.Response{Success: false, Message: "Confirmation does not match"}, http.StatusBadRequest)
+			return
+		}
+	}
+
 	if err := models.PurgeTrashItem(userID, isAdmin, itemType, id); err != nil {
 		log.Errorf("GlobalTrashPurge %s/%d: %v", itemType, id, err)
 		status := http.StatusInternalServerError
 		switch err {
 		case models.ErrCampaignNotFound, models.ErrCampaignGroupNotFound:
 			status = http.StatusNotFound
-		case models.ErrNotInTrash:
+		case models.ErrNotInTrash, models.ErrNotDeleted:
 			status = http.StatusBadRequest
 		}
 		if err.Error() == "purge requires admin privileges" {
 			status = http.StatusForbidden
+		} else if err.Error() == "can only purge campaigns in trash" {
+			status = http.StatusBadRequest
 		}
 		JSONResponse(w, models.Response{Success: false, Message: err.Error()}, status)
 		return

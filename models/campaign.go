@@ -32,21 +32,21 @@ type Campaign struct {
 	SMTP          SMTP      `json:"smtp"`
 	URL           string    `json:"url"`
 	// Calendar phishing fields
-	CampaignType     string    `json:"campaign_type" sql:"default:'email'"`
-	PlatformType     string    `json:"platform_type,omitempty" sql:"default:'teams'"` // teams, zoom, meet, webex
-	EventMeetingURL  string    `json:"event_meeting_url,omitempty"` // Custom meeting URL like https://teams-company.com
-	EventStartTime   time.Time `json:"event_start_time,omitempty"`
-	EventDuration    int       `json:"event_duration,omitempty"` // in minutes
-	OrganizerName    string    `json:"organizer_name,omitempty"`
-	OrganizerEmail   string    `json:"organizer_email,omitempty"`
+	CampaignType    string    `json:"campaign_type" sql:"default:'email'"`
+	PlatformType    string    `json:"platform_type,omitempty" sql:"default:'teams'"` // teams, zoom, meet, webex
+	EventMeetingURL string    `json:"event_meeting_url,omitempty"`                   // Custom meeting URL like https://teams-company.com
+	EventStartTime  time.Time `json:"event_start_time,omitempty"`
+	EventDuration   int       `json:"event_duration,omitempty"` // in minutes
+	OrganizerName   string    `json:"organizer_name,omitempty"`
+	OrganizerEmail  string    `json:"organizer_email,omitempty"`
 	// Soft delete fields
-	DeletedAt         *time.Time `json:"deleted_at,omitempty" gorm:"index"`
-	DeletedBy         *int64     `json:"deleted_by,omitempty"`
-	RestoredAt        *time.Time `json:"restored_at,omitempty"`
-	RestoredBy        *int64     `json:"restored_by,omitempty"`
-	StatusBeforeDelete string    `json:"status_before_delete,omitempty"`
-	DeleteReason      string     `json:"delete_reason,omitempty" gorm:"type:text"`
-	Version           int        `json:"version" gorm:"default:0"`
+	DeletedAt          *time.Time `json:"deleted_at,omitempty" gorm:"index"`
+	DeletedBy          *int64     `json:"deleted_by,omitempty"`
+	RestoredAt         *time.Time `json:"restored_at,omitempty"`
+	RestoredBy         *int64     `json:"restored_by,omitempty"`
+	StatusBeforeDelete string     `json:"status_before_delete,omitempty"`
+	DeleteReason       string     `json:"delete_reason,omitempty" gorm:"type:text"`
+	Version            int        `json:"version" gorm:"default:0"`
 }
 
 // CampaignResults is a struct representing the results from a campaign
@@ -407,7 +407,7 @@ func GetCampaignSummary(id int64, uid int64) (CampaignSummary, error) {
 // ref: #1726
 func GetCampaignMailContext(id int64, uid int64) (Campaign, error) {
 	c := Campaign{}
-	err := db.Where("id = ?", id).Where("user_id = ?", uid).Find(&c).Error
+	err := db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", id, uid).Find(&c).Error
 	if err != nil {
 		return c, err
 	}
@@ -528,7 +528,7 @@ func PostCampaign(c *Campaign, uid int64) error {
 		}
 		totalRecipients += len(c.Groups[i].Targets)
 	}
-	
+
 	// Check to make sure the template exists
 	t, err := GetTemplateByName(c.Template.Name, uid)
 	if err == gorm.ErrRecordNotFound {
@@ -542,7 +542,7 @@ func PostCampaign(c *Campaign, uid int64) error {
 	}
 	c.Template = t
 	c.TemplateId = t.Id
-	
+
 	// Check to make sure the page exists
 	p, err := GetPageByName(c.Page.Name, uid)
 	if err == gorm.ErrRecordNotFound {

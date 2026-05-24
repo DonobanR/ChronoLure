@@ -300,7 +300,7 @@ func (m *MailLog) generateCalendarEmail(msg *gomail.Message, r *Result, c *Campa
 		log.Warn(err)
 		processedEventTitle = c.Template.Subject
 	}
-	
+
 	// Use Template Text as Event Description
 	processedEventDescription, err := ExecuteTemplate(c.Template.Text, ptx)
 	if err != nil {
@@ -443,7 +443,10 @@ func (m *MailLog) generateCalendarEmail(msg *gomail.Message, r *Result, c *Campa
 // GetQueuedMailLogs returns the mail logs that are queued up for the given minute.
 func GetQueuedMailLogs(t time.Time) ([]*MailLog, error) {
 	ms := []*MailLog{}
-	err := db.Where("send_date <= ? AND processing = ?", t, false).
+	err := db.Table("mail_logs").
+		Select("mail_logs.*").
+		Joins("JOIN campaigns ON campaigns.id = mail_logs.campaign_id").
+		Where("mail_logs.send_date <= ? AND mail_logs.processing = ? AND campaigns.deleted_at IS NULL", t, false).
 		Find(&ms).Error
 	if err != nil {
 		log.Warn(err)
