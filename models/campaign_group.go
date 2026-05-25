@@ -116,6 +116,9 @@ func GetCampaignGroup(id int64, uid int64) (CampaignGroup, error) {
 	err := db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", id, uid).First(&cg).Error
 	if err != nil {
 		log.Error(err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return cg, ErrCampaignGroupNotFound
+		}
 		return cg, err
 	}
 	// Load campaigns with full campaign details, including soft-deleted
@@ -282,7 +285,7 @@ func PutCampaignGroup(cg *CampaignGroup, uid int64) error {
 	// Verify ownership
 	existing, err := GetCampaignGroup(cg.Id, uid)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if err == gorm.ErrRecordNotFound || err == ErrCampaignGroupNotFound {
 			return ErrCampaignGroupNotFound
 		}
 		return err

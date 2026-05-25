@@ -243,6 +243,40 @@ func (s *ModelsSuite) TestPurgeCampaignDeletesDependentRows(c *check.C) {
 	assertTableCount(c, "audit_log", "entity_type = ? AND entity_id = ? AND action = ?", 1, "campaign", campaign.Id, AuditCampaignPurged)
 }
 
+func (s *ModelsSuite) TestPurgeCampaignRejectsDifferentUser(c *check.C) {
+	campaign := s.createCampaign(c)
+	c.Assert(SoftDeleteCampaign(campaign.Id, campaign.UserId, "ownership test"), check.Equals, nil)
+
+	err := PurgeCampaign(campaign.Id, campaign.UserId+1, true)
+	c.Assert(err, check.Equals, ErrPermissionDenied)
+
+	_, err = GetTrashedCampaignByID(campaign.Id, campaign.UserId)
+	c.Assert(err, check.Equals, nil)
+	assertTableCount(c, "audit_log", "entity_type = ? AND entity_id = ? AND action = ?", 0, "campaign", campaign.Id, AuditCampaignPurged)
+}
+
+func (s *ModelsSuite) TestPurgeCampaignAllowsOwnerWithAdminFlag(c *check.C) {
+	campaign := s.createCampaign(c)
+	c.Assert(SoftDeleteCampaign(campaign.Id, campaign.UserId, "owner admin purge"), check.Equals, nil)
+
+	c.Assert(PurgeCampaign(campaign.Id, campaign.UserId, true), check.Equals, nil)
+
+	assertTableCount(c, "campaigns", "id = ?", 0, campaign.Id)
+	assertTableCount(c, "audit_log", "entity_type = ? AND entity_id = ? AND action = ?", 1, "campaign", campaign.Id, AuditCampaignPurged)
+}
+
+func (s *ModelsSuite) TestPurgeCampaignRejectsOwnerWithoutAdminFlag(c *check.C) {
+	campaign := s.createCampaign(c)
+	c.Assert(SoftDeleteCampaign(campaign.Id, campaign.UserId, "owner non-admin purge"), check.Equals, nil)
+
+	err := PurgeCampaign(campaign.Id, campaign.UserId, false)
+	c.Assert(err, check.ErrorMatches, "purge requires admin privileges")
+
+	_, err = GetTrashedCampaignByID(campaign.Id, campaign.UserId)
+	c.Assert(err, check.Equals, nil)
+	assertTableCount(c, "audit_log", "entity_type = ? AND entity_id = ? AND action = ?", 0, "campaign", campaign.Id, AuditCampaignPurged)
+}
+
 func (s *ModelsSuite) TestCampaignGroupLinkedCampaignActiveHasCompleteData(c *check.C) {
 	campaign := s.createCampaign(c)
 	c.Assert(CompleteCampaign(campaign.Id, campaign.UserId), check.Equals, nil)

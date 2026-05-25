@@ -102,6 +102,39 @@ func (s *ModelsSuite) TestCampaignGroupOrphanLinkSkippedInStats(c *check.C) {
 	c.Assert(len(stats.RecipientJourneys), check.Equals, 0)
 }
 
+func (s *ModelsSuite) TestCampaignGroupCrossUserLinkSkippedInStats(c *check.C) {
+	campaign := s.createCampaign(c)
+	c.Assert(db.Model(&Campaign{}).Where("id = ?", campaign.Id).Update("user_id", int64(2)).Error, check.Equals, nil)
+
+	group := CampaignGroup{Name: "Cross-user metrics group", UserId: 1, CreatedDate: time.Now().UTC()}
+	c.Assert(db.Save(&group).Error, check.Equals, nil)
+	c.Assert(db.Save(&CampaignGroupCampaign{GroupId: group.Id, CampaignId: campaign.Id, OrderIndex: 0}).Error, check.Equals, nil)
+
+	got, err := GetCampaignGroup(group.Id, group.UserId)
+	c.Assert(err, check.Equals, nil)
+	c.Assert(len(got.Campaigns), check.Equals, 0)
+
+	stats, err := GetCampaignGroupStats(group.Id, group.UserId)
+	c.Assert(err, check.Equals, nil)
+	c.Assert(stats.TotalRecipients, check.Equals, int64(0))
+	c.Assert(stats.ClickedLink, check.Equals, int64(0))
+	c.Assert(stats.SubmittedData, check.Equals, int64(0))
+	c.Assert(len(stats.RecipientJourneys), check.Equals, 0)
+}
+
+func (s *ModelsSuite) TestCampaignGroupRejectsCrossUserCampaignLink(c *check.C) {
+	campaign := s.createCampaign(c)
+
+	group := CampaignGroup{
+		Name:   "Rejected cross-user group",
+		UserId: campaign.UserId + 1,
+		Campaigns: []CampaignGroupCampaign{
+			{CampaignId: campaign.Id, OrderIndex: 0},
+		},
+	}
+	c.Assert(PostCampaignGroup(&group, campaign.UserId+1), check.Equals, ErrInvalidCampaignGroupOwner)
+}
+
 func (s *ModelsSuite) TestCampaignGroupCalendarCampaignMetrics(c *check.C) {
 	campaign := s.createCampaignDependencies(c)
 	campaign.CampaignType = "calendar"

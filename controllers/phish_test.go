@@ -229,6 +229,42 @@ func TestClickedPhishingLinkAfterOpen(t *testing.T) {
 	}
 }
 
+func TestNormalEmailCampaignRecordsOpenedClickedSubmittedOnce(t *testing.T) {
+	ctx := setupTest(t)
+	defer tearDown(t, ctx)
+	campaign := getFirstCampaign(t)
+	result := campaign.Results[0]
+
+	openEmail(t, ctx, result.RId)
+	clickLink(t, ctx, result.RId, campaign.Page.HTML)
+	resp, err := http.PostForm(
+		fmt.Sprintf("%s/?%s=%s", ctx.phishServer.URL, models.RecipientParameter, result.RId),
+		url.Values{"username": {"test"}, "password": {"secret"}},
+	)
+	if err != nil {
+		t.Fatalf("error posting landing page: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected submit status: %d", resp.StatusCode)
+	}
+
+	campaign = getFirstCampaign(t)
+	result = campaign.Results[0]
+	if result.Status != models.EventDataSubmit {
+		t.Fatalf("unexpected result status received. expected %s got %s", models.EventDataSubmit, result.Status)
+	}
+	if got := countCampaignEvents(t, campaign.Id, models.EventOpened); got != 1 {
+		t.Fatalf("expected one Email Opened event, got %d", got)
+	}
+	if got := countCampaignEvents(t, campaign.Id, models.EventClicked); got != 1 {
+		t.Fatalf("expected one Clicked Link event, got %d", got)
+	}
+	if got := countCampaignEvents(t, campaign.Id, models.EventDataSubmit); got != 1 {
+		t.Fatalf("expected one Submitted Data event, got %d", got)
+	}
+}
+
 func TestNoRecipientID(t *testing.T) {
 	ctx := setupTest(t)
 	defer tearDown(t, ctx)

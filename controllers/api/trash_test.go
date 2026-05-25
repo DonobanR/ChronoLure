@@ -13,11 +13,15 @@ import (
 )
 
 func createTrashAPITestCampaign(t *testing.T, name string) models.Campaign {
+	return createTrashAPITestCampaignForUser(t, name, 1)
+}
+
+func createTrashAPITestCampaignForUser(t *testing.T, name string, userID int64) models.Campaign {
 	group := models.Group{Name: fmt.Sprintf("%s group", name)}
 	group.Targets = []models.Target{
 		{BaseRecipient: models.BaseRecipient{Email: fmt.Sprintf("%d@example.com", time.Now().UnixNano())}},
 	}
-	group.UserId = 1
+	group.UserId = userID
 	if err := models.PostGroup(&group); err != nil {
 		t.Fatalf("PostGroup: %v", err)
 	}
@@ -27,7 +31,7 @@ func createTrashAPITestCampaign(t *testing.T, name string) models.Campaign {
 		Subject: "Test subject",
 		Text:    "Text",
 		HTML:    "<html>Test</html>",
-		UserId:  1,
+		UserId:  userID,
 	}
 	if err := models.PostTemplate(&template); err != nil {
 		t.Fatalf("PostTemplate: %v", err)
@@ -36,7 +40,7 @@ func createTrashAPITestCampaign(t *testing.T, name string) models.Campaign {
 	page := models.Page{
 		Name:   fmt.Sprintf("%s page", name),
 		HTML:   "<html>Test</html>",
-		UserId: 1,
+		UserId: userID,
 	}
 	if err := models.PostPage(&page); err != nil {
 		t.Fatalf("PostPage: %v", err)
@@ -44,7 +48,7 @@ func createTrashAPITestCampaign(t *testing.T, name string) models.Campaign {
 
 	smtp := models.SMTP{
 		Name:        fmt.Sprintf("%s smtp", name),
-		UserId:      1,
+		UserId:      userID,
 		Host:        "example.com",
 		FromAddress: "test@test.com",
 	}
@@ -54,7 +58,7 @@ func createTrashAPITestCampaign(t *testing.T, name string) models.Campaign {
 
 	campaign := models.Campaign{
 		Name:     name,
-		UserId:   1,
+		UserId:   userID,
 		Template: template,
 		Page:     page,
 		SMTP:     smtp,
@@ -66,6 +70,24 @@ func createTrashAPITestCampaign(t *testing.T, name string) models.Campaign {
 	return campaign
 }
 
+func createTrashAPIUser(t *testing.T, prefix string) models.User {
+	role, err := models.GetRoleBySlug(models.RoleUser)
+	if err != nil {
+		t.Fatalf("GetRoleBySlug: %v", err)
+	}
+	user := models.User{
+		Username: fmt.Sprintf("%s-user-%d", prefix, time.Now().UnixNano()),
+		Hash:     "hash",
+		ApiKey:   fmt.Sprintf("%s-api-key-%d", prefix, time.Now().UnixNano()),
+		Role:     role,
+		RoleID:   role.ID,
+	}
+	if err := models.PutUser(&user); err != nil {
+		t.Fatalf("PutUser: %v", err)
+	}
+	return user
+}
+
 func makeTrashPurgeRequest(t *testing.T, testCtx *testContext, campaignID int64, confirmation string) *httptest.ResponseRecorder {
 	body, err := json.Marshal(map[string]string{"confirmation": confirmation})
 	if err != nil {
@@ -75,9 +97,13 @@ func makeTrashPurgeRequest(t *testing.T, testCtx *testContext, campaignID int64,
 }
 
 func makeTrashPurgeRawRequest(t *testing.T, testCtx *testContext, itemType string, campaignID int64, body []byte) *httptest.ResponseRecorder {
+	return makeTrashPurgeRawRequestWithAPIKey(t, testCtx, itemType, campaignID, body, testCtx.apiKey)
+}
+
+func makeTrashPurgeRawRequestWithAPIKey(t *testing.T, testCtx *testContext, itemType string, campaignID int64, body []byte, apiKey string) *httptest.ResponseRecorder {
 	url := fmt.Sprintf("/api/trash/%s/%d/purge", itemType, campaignID)
 	req := httptest.NewRequest(http.MethodDelete, url, bytes.NewReader(body))
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testCtx.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	testCtx.apiServer.ServeHTTP(w, req)
@@ -97,12 +123,16 @@ func makeTrashRestoreRequest(t *testing.T, testCtx *testContext, itemType string
 }
 
 func makeTrashListRequest(t *testing.T, testCtx *testContext, filter string) *httptest.ResponseRecorder {
+	return makeTrashListRequestWithAPIKey(t, testCtx, filter, testCtx.apiKey)
+}
+
+func makeTrashListRequestWithAPIKey(t *testing.T, testCtx *testContext, filter string, apiKey string) *httptest.ResponseRecorder {
 	url := "/api/trash"
 	if filter != "" {
 		url += "?type=" + filter
 	}
 	req := httptest.NewRequest(http.MethodGet, url, nil)
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testCtx.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	w := httptest.NewRecorder()
 	testCtx.apiServer.ServeHTTP(w, req)
 	return w
@@ -389,6 +419,98 @@ func TestGlobalTrashRestoreRejectsCampaignOwnedByAnotherUser(t *testing.T) {
 	}
 }
 
+func TestUserCannotSoftDeleteAnotherUsersCampaign(t *testing.T) {
+	testCtx := setupTest(t)
+	owner := createTrashAPIUser(t, "campaign-owner")
+	campaign := createTrashAPITestCampaignForUser(t, "foreign soft delete campaign", owner.Id)
+
+	w := makeCampaignDeleteRequest(t, testCtx, campaign.Id, []byte(`{"reason":"forbidden"}`))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d got %d body=%s", http.StatusNotFound, w.Code, w.Body.String())
+	}
+	if _, err := models.GetCampaign(campaign.Id, owner.Id); err != nil {
+		t.Fatalf("expected campaign to remain active for owner, got err=%v", err)
+	}
+	if _, err := models.GetTrashedCampaignByID(campaign.Id, owner.Id); err != models.ErrCampaignNotFound {
+		t.Fatalf("expected campaign not to move to trash, got err=%v", err)
+	}
+}
+
+func TestUserCannotRestoreAnotherUsersCampaign(t *testing.T) {
+	testCtx := setupTest(t)
+	owner := createTrashAPIUser(t, "campaign-owner")
+	campaign := createTrashAPITestCampaignForUser(t, "foreign restore campaign", owner.Id)
+	if err := models.SoftDeleteCampaign(campaign.Id, owner.Id, "owner delete"); err != nil {
+		t.Fatalf("SoftDeleteCampaign: %v", err)
+	}
+
+	w := makeTrashRestoreRequest(t, testCtx, "campaign", campaign.Id, testCtx.apiKey)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d got %d body=%s", http.StatusForbidden, w.Code, w.Body.String())
+	}
+	if _, err := models.GetTrashedCampaignByID(campaign.Id, owner.Id); err != nil {
+		t.Fatalf("expected campaign to remain in trash, got err=%v", err)
+	}
+}
+
+func TestUserCannotPurgeAnotherUsersCampaign(t *testing.T) {
+	testCtx := setupTest(t)
+	owner := createTrashAPIUser(t, "campaign-owner")
+	campaign := createTrashAPITestCampaignForUser(t, "foreign purge campaign", owner.Id)
+	if err := models.SoftDeleteCampaign(campaign.Id, owner.Id, "owner delete"); err != nil {
+		t.Fatalf("SoftDeleteCampaign: %v", err)
+	}
+	body, err := json.Marshal(map[string]string{"confirmation": campaign.Name})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	w := makeTrashPurgeRawRequestWithAPIKey(t, testCtx, "campaign", campaign.Id, body, testCtx.apiKey)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d got %d body=%s", http.StatusNotFound, w.Code, w.Body.String())
+	}
+	if _, err := models.GetTrashedCampaignByID(campaign.Id, owner.Id); err != nil {
+		t.Fatalf("expected campaign to remain in trash, got err=%v", err)
+	}
+}
+
+func TestNonAdminOwnerCannotPurgeCampaign(t *testing.T) {
+	testCtx := setupTest(t)
+	owner := createTrashAPIUser(t, "non-admin-owner")
+	campaign := createTrashAPITestCampaignForUser(t, "non admin owner purge campaign", owner.Id)
+	if err := models.SoftDeleteCampaign(campaign.Id, owner.Id, "owner delete"); err != nil {
+		t.Fatalf("SoftDeleteCampaign: %v", err)
+	}
+	body, err := json.Marshal(map[string]string{"confirmation": campaign.Name})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	w := makeTrashPurgeRawRequestWithAPIKey(t, testCtx, "campaign", campaign.Id, body, owner.ApiKey)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d got %d body=%s", http.StatusForbidden, w.Code, w.Body.String())
+	}
+	if _, err := models.GetTrashedCampaignByID(campaign.Id, owner.Id); err != nil {
+		t.Fatalf("expected campaign to remain in trash, got err=%v", err)
+	}
+}
+
+func TestUserCannotSeeAnotherUsersTrashItem(t *testing.T) {
+	testCtx := setupTest(t)
+	owner := createTrashAPIUser(t, "trash-owner")
+	campaign := createTrashAPITestCampaignForUser(t, "foreign trash list campaign", owner.Id)
+	if err := models.SoftDeleteCampaign(campaign.Id, owner.Id, "owner delete"); err != nil {
+		t.Fatalf("SoftDeleteCampaign: %v", err)
+	}
+
+	items := decodeTrashItems(t, makeTrashListRequestWithAPIKey(t, testCtx, "campaign", testCtx.apiKey))
+	for _, item := range items {
+		if int64(item["id"].(float64)) == campaign.Id && item["type"] == models.TrashTypeCampaign {
+			t.Fatalf("unexpected foreign campaign in trash list: %#v", item)
+		}
+	}
+}
+
 func createTrashAPITestCampaignGroup(t *testing.T, campaign models.Campaign, name string) models.CampaignGroup {
 	group := models.CampaignGroup{
 		Name:   name,
@@ -403,10 +525,76 @@ func createTrashAPITestCampaignGroup(t *testing.T, campaign models.Campaign, nam
 	return group
 }
 
+func TestUserCannotGetAnotherUsersCampaignGroup(t *testing.T) {
+	testCtx := setupTest(t)
+	owner := createTrashAPIUser(t, "group-owner")
+	campaign := createTrashAPITestCampaignForUser(t, "foreign group campaign", owner.Id)
+	group := createTrashAPITestCampaignGroup(t, campaign, "foreign group")
+
+	w := makeAPIRequest(t, testCtx, http.MethodGet, fmt.Sprintf("/api/campaign-groups/%d", group.Id), nil, testCtx.apiKey)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d got %d body=%s", http.StatusNotFound, w.Code, w.Body.String())
+	}
+}
+
+func TestUserCannotGetAnotherUsersCampaignGroupStats(t *testing.T) {
+	testCtx := setupTest(t)
+	owner := createTrashAPIUser(t, "group-owner")
+	campaign := createTrashAPITestCampaignForUser(t, "foreign group stats campaign", owner.Id)
+	group := createTrashAPITestCampaignGroup(t, campaign, "foreign stats group")
+
+	w := makeAPIRequest(t, testCtx, http.MethodGet, fmt.Sprintf("/api/campaign-groups/%d/stats", group.Id), nil, testCtx.apiKey)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d got %d body=%s", http.StatusNotFound, w.Code, w.Body.String())
+	}
+}
+
+func TestUserCannotRestoreOrPurgeAnotherUsersCampaignGroup(t *testing.T) {
+	testCtx := setupTest(t)
+	owner := createTrashAPIUser(t, "group-owner")
+	campaign := createTrashAPITestCampaignForUser(t, "foreign trashed group campaign", owner.Id)
+	group := createTrashAPITestCampaignGroup(t, campaign, "foreign trashed group")
+	if err := models.SoftDeleteCampaignGroup(group.Id, owner.Id, "owner delete"); err != nil {
+		t.Fatalf("SoftDeleteCampaignGroup: %v", err)
+	}
+
+	restore := makeTrashRestoreRequest(t, testCtx, models.TrashTypeCampaignGroup, group.Id, testCtx.apiKey)
+	if restore.Code != http.StatusNotFound {
+		t.Fatalf("expected restore status %d got %d body=%s", http.StatusNotFound, restore.Code, restore.Body.String())
+	}
+	if _, err := models.RestoreCampaignGroup(group.Id, owner.Id); err != nil {
+		t.Fatalf("owner should still be able to restore group, got err=%v", err)
+	}
+	if err := models.SoftDeleteCampaignGroup(group.Id, owner.Id, "owner delete again"); err != nil {
+		t.Fatalf("SoftDeleteCampaignGroup second: %v", err)
+	}
+
+	purge := makeTrashPurgeRawRequestWithAPIKey(t, testCtx, models.TrashTypeCampaignGroup, group.Id, []byte(`{}`), testCtx.apiKey)
+	if purge.Code != http.StatusNotFound {
+		t.Fatalf("expected purge status %d got %d body=%s", http.StatusNotFound, purge.Code, purge.Body.String())
+	}
+	if _, err := models.RestoreCampaignGroup(group.Id, owner.Id); err != nil {
+		t.Fatalf("expected group to remain in trash for owner, got err=%v", err)
+	}
+}
+
 func makeCampaignDeleteRequest(t *testing.T, testCtx *testContext, campaignID int64, body []byte) *httptest.ResponseRecorder {
+	return makeCampaignDeleteRequestWithAPIKey(t, testCtx, campaignID, body, testCtx.apiKey)
+}
+
+func makeCampaignDeleteRequestWithAPIKey(t *testing.T, testCtx *testContext, campaignID int64, body []byte, apiKey string) *httptest.ResponseRecorder {
 	url := fmt.Sprintf("/api/campaigns/%d", campaignID)
 	req := httptest.NewRequest(http.MethodDelete, url, bytes.NewReader(body))
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testCtx.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	testCtx.apiServer.ServeHTTP(w, req)
+	return w
+}
+
+func makeAPIRequest(t *testing.T, testCtx *testContext, method string, path string, body []byte, apiKey string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	testCtx.apiServer.ServeHTTP(w, req)

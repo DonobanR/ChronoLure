@@ -286,6 +286,13 @@ func PurgeCampaign(campaignID int64, userID int64, isAdmin bool) error {
 		return err
 	}
 
+	// Validate ownership (multi-tenant)
+	if c.UserId != userID {
+		tx.Rollback()
+		log.Warnf("User %d attempted to purge campaign %d owned by %d", userID, campaignID, c.UserId)
+		return ErrPermissionDenied
+	}
+
 	// Must be in trash
 	if !c.IsDeleted() {
 		tx.Rollback()

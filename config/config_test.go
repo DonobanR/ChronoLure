@@ -66,6 +66,9 @@ func TestLoadConfig(t *testing.T) {
 	expectedConfig.TestFlag = false
 	expectedConfig.AdminConf.CSRFKey = ""
 	expectedConfig.Logging = &log.Config{}
+	expectedConfig.TrashRetentionDays = 90
+	expectedConfig.TrashPurgeInterval = 60
+	expectedConfig.TrashPurgeBatchSize = 100
 	if !reflect.DeepEqual(expectedConfig, conf) {
 		t.Fatalf("invalid config received. expected %#v got %#v", expectedConfig, conf)
 	}
