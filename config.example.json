@@ -24,7 +24,7 @@
     "level": "info"
   },
   "trash_retention_days": 90,
-  "trash_purge_enabled": true,
+  "trash_purge_enabled": false,
   "trash_purge_interval_minutes": 60,
   "trash_purge_batch_size": 100
 }

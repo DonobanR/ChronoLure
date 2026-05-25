@@ -100,6 +100,22 @@ func TestTrashTTLRunOnceDisabledDoesNotPurgeExpiredCampaign(t *testing.T) {
 	assertCampaignStillTrashed(t, campaign.Id, campaign.UserId)
 }
 
+func TestTrashTTLRunOnceIntervalOnlyDoesNotPurgeExpiredCampaign(t *testing.T) {
+	db := setupTrashTTLTestDB(t)
+	campaign := createTrashTTLTestCampaign(t, "ttl interval only disabled")
+	softDeleteAndAgeCampaign(t, db, campaign, 120*24*time.Hour)
+
+	job := NewTrashTTLJob(TrashTTLConfig{
+		RetentionDays: 30,
+		Interval:      time.Minute,
+		BatchSize:     100,
+	})
+
+	require.NoError(t, job.RunOnce(context.Background()))
+	assert.False(t, job.enabled)
+	assertCampaignStillTrashed(t, campaign.Id, campaign.UserId)
+}
+
 func TestTrashTTLRunOnceKeepsRecentTrashWithinRetention(t *testing.T) {
 	db := setupTrashTTLTestDB(t)
 	campaign := createTrashTTLTestCampaign(t, "ttl recent trash")

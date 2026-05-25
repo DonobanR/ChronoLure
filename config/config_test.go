@@ -69,13 +69,54 @@ func TestLoadConfig(t *testing.T) {
 	expectedConfig.TrashRetentionDays = 90
 	expectedConfig.TrashPurgeInterval = 60
 	expectedConfig.TrashPurgeBatchSize = 100
+	expectedConfig.TrashPurgeEnabled = false
 	if !reflect.DeepEqual(expectedConfig, conf) {
 		t.Fatalf("invalid config received. expected %#v got %#v", expectedConfig, conf)
+	}
+	if conf.TrashPurgeEnabled {
+		t.Fatalf("trash purge must be disabled by default")
 	}
 
 	// Load an invalid config
 	_, err = LoadConfig("bogusfile")
 	if err == nil {
 		t.Fatalf("expected error when loading invalid config, but got %v", err)
+	}
+}
+
+func TestLoadConfigTrashPurgeIntervalDoesNotEnableTTL(t *testing.T) {
+	f := createTemporaryConfig(t)
+	defer removeTemporaryConfig(t, f)
+	configWithInterval := []byte(`{
+		"admin_server": {},
+		"phish_server": {},
+		"db_name": "sqlite3",
+		"db_path": "gophish.db",
+		"migrations_prefix": "db/db_",
+		"trash_purge_interval_minutes": 1
+	}`)
+	if _, err := f.Write(configWithInterval); err != nil {
+		t.Fatalf("error writing config to temporary file: %v", err)
+	}
+
+	conf, err := LoadConfig(f.Name())
+	if err != nil {
+		t.Fatalf("error loading config from temporary file: %v", err)
+	}
+	if conf.TrashPurgeEnabled {
+		t.Fatalf("trash_purge_interval_minutes must not enable TTL purge")
+	}
+	if conf.TrashPurgeInterval != 1 {
+		t.Fatalf("expected interval 1 got %d", conf.TrashPurgeInterval)
+	}
+}
+
+func TestConfigExampleDisablesTrashPurge(t *testing.T) {
+	conf, err := LoadConfig("../config.example.json")
+	if err != nil {
+		t.Fatalf("error loading config.example.json: %v", err)
+	}
+	if conf.TrashPurgeEnabled {
+		t.Fatalf("config.example.json must keep trash_purge_enabled=false")
 	}
 }

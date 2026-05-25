@@ -38,10 +38,10 @@ type Config struct {
 	ContactAddress string      `json:"contact_address"`
 	Logging        *log.Config `json:"logging"`
 	// Trash/soft delete configuration
-	TrashRetentionDays   int `json:"trash_retention_days"`
-	TrashPurgeEnabled    bool `json:"trash_purge_enabled"`
-	TrashPurgeInterval   int  `json:"trash_purge_interval_minutes"` // In minutes
-	TrashPurgeBatchSize  int  `json:"trash_purge_batch_size"`
+	TrashRetentionDays  int  `json:"trash_retention_days"`
+	TrashPurgeEnabled   bool `json:"trash_purge_enabled"`
+	TrashPurgeInterval  int  `json:"trash_purge_interval_minutes"` // In minutes
+	TrashPurgeBatchSize int  `json:"trash_purge_batch_size"`
 }
 
 // Version contains the current gophish version
@@ -76,9 +76,8 @@ func LoadConfig(filepath string) (*Config, error) {
 	if config.TrashPurgeBatchSize == 0 {
 		config.TrashPurgeBatchSize = 100 // Default: 100 campaigns per batch
 	}
-	// Default: trash purge enabled (can be disabled in config.json)
-	// Note: Boolean zero value is false, so we default to true
-	// Users must explicitly set "trash_purge_enabled": false to disable
+	// Trash purge is opt-in. The zero value for TrashPurgeEnabled is false,
+	// and interval/batch defaults must not enable automatic purging by themselves.
 	// Choosing the migrations directory based on the database used.
 	config.MigrationsPath = config.MigrationsPath + config.DBName
 	// Explicitly set the TestFlag to false to prevent config.json overrides
