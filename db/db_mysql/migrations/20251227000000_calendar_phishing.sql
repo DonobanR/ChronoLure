@@ -4,6 +4,8 @@
 
 -- Add calendar phishing fields to campaigns table
 ALTER TABLE `campaigns` ADD COLUMN campaign_type VARCHAR(255) DEFAULT 'email';
+ALTER TABLE `campaigns` ADD COLUMN platform_type VARCHAR(255);
+ALTER TABLE `campaigns` ADD COLUMN event_meeting_url VARCHAR(255);
 ALTER TABLE `campaigns` ADD COLUMN event_title VARCHAR(255);
 ALTER TABLE `campaigns` ADD COLUMN event_description TEXT;
 ALTER TABLE `campaigns` ADD COLUMN event_start_time DATETIME;
@@ -33,10 +35,11 @@ DROP INDEX idx_calendar_events_result_id ON calendar_events;
 DROP TABLE IF EXISTS `calendar_events`;
 
 ALTER TABLE `campaigns` DROP COLUMN campaign_type;
+ALTER TABLE `campaigns` DROP COLUMN platform_type;
+ALTER TABLE `campaigns` DROP COLUMN event_meeting_url;
 ALTER TABLE `campaigns` DROP COLUMN event_title;
 ALTER TABLE `campaigns` DROP COLUMN event_description;
 ALTER TABLE `campaigns` DROP COLUMN event_start_time;
 ALTER TABLE `campaigns` DROP COLUMN event_duration;
 ALTER TABLE `campaigns` DROP COLUMN organizer_name;
 ALTER TABLE `campaigns` DROP COLUMN organizer_email;
-

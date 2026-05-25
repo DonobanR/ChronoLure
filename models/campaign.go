@@ -32,13 +32,15 @@ type Campaign struct {
 	SMTP          SMTP      `json:"smtp"`
 	URL           string    `json:"url"`
 	// Calendar phishing fields
-	CampaignType    string    `json:"campaign_type" sql:"default:'email'"`
-	PlatformType    string    `json:"platform_type,omitempty" sql:"default:'teams'"` // teams, zoom, meet, webex
-	EventMeetingURL string    `json:"event_meeting_url,omitempty"`                   // Custom meeting URL like https://teams-company.com
-	EventStartTime  time.Time `json:"event_start_time,omitempty"`
-	EventDuration   int       `json:"event_duration,omitempty"` // in minutes
-	OrganizerName   string    `json:"organizer_name,omitempty"`
-	OrganizerEmail  string    `json:"organizer_email,omitempty"`
+	CampaignType     string    `json:"campaign_type" sql:"default:'email'"`
+	PlatformType     string    `json:"platform_type,omitempty" sql:"default:'teams'"` // teams, zoom, meet, webex
+	EventMeetingURL  string    `json:"event_meeting_url,omitempty"`                   // Custom meeting URL like https://teams-company.com
+	EventTitle       string    `json:"event_title,omitempty"`
+	EventDescription string    `json:"event_description,omitempty" gorm:"type:text"`
+	EventStartTime   time.Time `json:"event_start_time,omitempty"`
+	EventDuration    int       `json:"event_duration,omitempty"` // in minutes
+	OrganizerName    string    `json:"organizer_name,omitempty"`
+	OrganizerEmail   string    `json:"organizer_email,omitempty"`
 	// Soft delete fields
 	DeletedAt          *time.Time `json:"deleted_at,omitempty" gorm:"index"`
 	DeletedBy          *int64     `json:"deleted_by,omitempty"`

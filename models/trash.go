@@ -119,12 +119,7 @@ func GenericSoftDelete(entity Trashable, userID int64, reason string, auditActio
 	}
 
 	// Audit log (non-blocking: log failure but don't roll back)
-	audit := &AuditLog{
-		ActorID:    &userID,
-		Action:     auditAction,
-		EntityType: entity.GetEntityType(),
-		EntityID:   entity.GetID(),
-	}
+	audit := userAuditLog(tx, userID, auditAction, entity.GetEntityType(), entity.GetID())
 	audit.SetMetadata(map[string]interface{}{
 		"name":   entity.GetName(),
 		"reason": reason,
@@ -224,12 +219,7 @@ func GenericRestore(entity Trashable, userID int64, auditAction string, nameConf
 	}
 
 	// Audit log
-	audit := &AuditLog{
-		ActorID:    &userID,
-		Action:     auditAction,
-		EntityType: entity.GetEntityType(),
-		EntityID:   entity.GetID(),
-	}
+	audit := userAuditLog(tx, userID, auditAction, entity.GetEntityType(), entity.GetID())
 	audit.SetMetadata(map[string]interface{}{
 		"name":          newName,
 		"original_name": originalName,
@@ -269,12 +259,7 @@ func GenericPurge(entity Trashable, userID int64, auditAction string) error {
 	}()
 
 	// Audit BEFORE delete — critical, must persist even after row is gone
-	audit := &AuditLog{
-		ActorID:    &userID,
-		Action:     auditAction,
-		EntityType: entity.GetEntityType(),
-		EntityID:   entity.GetID(),
-	}
+	audit := userAuditLog(tx, userID, auditAction, entity.GetEntityType(), entity.GetID())
 	audit.SetMetadata(map[string]interface{}{
 		"name":    entity.GetName(),
 		"user_id": entity.GetUserID(),

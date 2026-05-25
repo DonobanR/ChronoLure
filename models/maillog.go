@@ -294,19 +294,7 @@ func (m *MailLog) generateCalendarEmail(msg *gomail.Message, r *Result, c *Campa
 		return err
 	}
 
-	// Use Template Subject as Event Title
-	processedEventTitle, err := ExecuteTemplate(c.Template.Subject, ptx)
-	if err != nil {
-		log.Warn(err)
-		processedEventTitle = c.Template.Subject
-	}
-
-	// Use Template Text as Event Description
-	processedEventDescription, err := ExecuteTemplate(c.Template.Text, ptx)
-	if err != nil {
-		log.Warn(err)
-		processedEventDescription = c.Template.Text
-	}
+	processedEventTitle, processedEventDescription := c.RenderCalendarEventFields(ptx)
 
 	// Populate calendar-specific fields in the template context with processed values
 	ptx.EventTitle = processedEventTitle
@@ -549,19 +537,7 @@ func GenerateICSForResult(r *Result, c *Campaign) (string, error) {
 		return "", err
 	}
 
-	// Use Template Subject as Event Title
-	processedEventTitle, err := ExecuteTemplate(c.Template.Subject, ptx)
-	if err != nil {
-		log.Warn(err)
-		processedEventTitle = c.Template.Subject
-	}
-
-	// Use Template Text as Event Description
-	processedEventDescription, err := ExecuteTemplate(c.Template.Text, ptx)
-	if err != nil {
-		log.Warn(err)
-		processedEventDescription = c.Template.Text
-	}
+	processedEventTitle, processedEventDescription := c.RenderCalendarEventFields(ptx)
 
 	// Generate calendar meeting URL
 	meetingURL := fmt.Sprintf("%s/calendar?rid=%s", c.URL, r.RId)

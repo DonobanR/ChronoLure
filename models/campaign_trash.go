@@ -112,17 +112,12 @@ func SoftDeleteCampaign(campaignID int64, userID int64, reason string) error {
 	}
 
 	// Audit log
-	audit := &AuditLog{
-		ActorID:    &userID,
-		Action:     AuditCampaignSoftDeleted,
-		EntityType: "campaign",
-		EntityID:   campaignID,
-	}
+	audit := userAuditLog(tx, userID, AuditCampaignSoftDeleted, "campaign", campaignID)
 	audit.SetMetadata(map[string]interface{}{
-		"name":          c.Name,
-		"status_before": c.StatusBeforeDelete,
-		"reason":        reason,
-		"campaign_type": c.CampaignType,
+		"name":                 c.Name,
+		"status_before_delete": c.StatusBeforeDelete,
+		"reason":               reason,
+		"campaign_type":        c.CampaignType,
 	})
 
 	if err := tx.Create(audit).Error; err != nil {
@@ -241,12 +236,7 @@ func RestoreCampaign(campaignID int64, userID int64) (*RestoreResult, error) {
 	}
 
 	// Audit
-	audit := &AuditLog{
-		ActorID:    &userID,
-		Action:     AuditCampaignRestored,
-		EntityType: "campaign",
-		EntityID:   campaignID,
-	}
+	audit := userAuditLog(tx, userID, AuditCampaignRestored, "campaign", campaignID)
 	audit.SetMetadata(map[string]interface{}{
 		"name":          c.Name,
 		"original_name": originalName,
@@ -303,12 +293,7 @@ func PurgeCampaign(campaignID int64, userID int64, isAdmin bool) error {
 	}
 
 	// Audit BEFORE delete (critical - must persist even after deletion)
-	audit := &AuditLog{
-		ActorID:    &userID,
-		Action:     AuditCampaignPurged,
-		EntityType: "campaign",
-		EntityID:   campaignID,
-	}
+	audit := userAuditLog(tx, userID, AuditCampaignPurged, "campaign", campaignID)
 	audit.SetMetadata(map[string]interface{}{
 		"name":       c.Name,
 		"deleted_at": c.DeletedAt,

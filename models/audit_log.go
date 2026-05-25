@@ -5,6 +5,7 @@ import (
 	"time"
 
 	log "github.com/gophish/gophish/logger"
+	"github.com/jinzhu/gorm"
 )
 
 // AuditAction constants
@@ -21,16 +22,16 @@ const (
 
 // AuditLog represents an audit trail entry
 type AuditLog struct {
-	ID         int64                  `json:"id" gorm:"primaryKey"`
-	Timestamp  time.Time              `json:"timestamp" gorm:"default:CURRENT_TIMESTAMP"`
-	ActorID    *int64                 `json:"actor_id,omitempty"`
-	ActorName  string                 `json:"actor_name,omitempty"`
-	Action     string                 `json:"action" gorm:"not null"`
-	EntityType string                 `json:"entity_type" gorm:"not null"`
-	EntityID   int64                  `json:"entity_id" gorm:"not null"`
-	Metadata   string                 `json:"metadata,omitempty" gorm:"type:text"` // JSON as string for compatibility
-	IPAddress  string                 `json:"ip_address,omitempty"`
-	UserAgent  string                 `json:"user_agent,omitempty" gorm:"type:text"`
+	ID         int64     `json:"id" gorm:"primaryKey"`
+	Timestamp  time.Time `json:"timestamp" gorm:"default:CURRENT_TIMESTAMP"`
+	ActorID    *int64    `json:"actor_id,omitempty"`
+	ActorName  string    `json:"actor_name,omitempty"`
+	Action     string    `json:"action" gorm:"not null"`
+	EntityType string    `json:"entity_type" gorm:"not null"`
+	EntityID   int64     `json:"entity_id" gorm:"not null"`
+	Metadata   string    `json:"metadata,omitempty" gorm:"type:text"` // JSON as string for compatibility
+	IPAddress  string    `json:"ip_address,omitempty"`
+	UserAgent  string    `json:"user_agent,omitempty" gorm:"type:text"`
 }
 
 // TableName specifies the table name for AuditLog
@@ -74,6 +75,29 @@ func SaveAuditLog(entry *AuditLog) error {
 	return err
 }
 
+func userAuditLog(tx *gorm.DB, userID int64, action string, entityType string, entityID int64) *AuditLog {
+	return &AuditLog{
+		ActorID:    &userID,
+		ActorName:  auditActorName(tx, userID),
+		Action:     action,
+		EntityType: entityType,
+		EntityID:   entityID,
+	}
+}
+
+func auditActorName(tx *gorm.DB, userID int64) string {
+	user := User{}
+	query := db
+	if tx != nil {
+		query = tx
+	}
+	if err := query.Select("username").Where("id = ?", userID).First(&user).Error; err != nil {
+		log.Errorf("Failed to resolve audit actor name for user %d: %v", userID, err)
+		return ""
+	}
+	return user.Username
+}
+
 // GetAuditLogs retrieves audit history for entity
 func GetAuditLogs(entityType string, entityID int64) ([]AuditLog, error) {
 	logs := []AuditLog{}
@@ -91,11 +115,11 @@ func GetAuditLogsByActor(actorID int64, limit int) ([]AuditLog, error) {
 	logs := []AuditLog{}
 	query := db.Where("actor_id = ?", actorID).
 		Order("timestamp DESC")
-	
+
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
-	
+
 	err := query.Find(&logs).Error
 	if err != nil {
 		log.Error(err)

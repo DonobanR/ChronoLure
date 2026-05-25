@@ -26,12 +26,12 @@ type PhishingTemplateContext struct {
 	BaseURL     string
 	BaseRecipient
 	// Calendar campaign fields (optional, only populated for calendar campaigns)
-	EventTitle      string
+	EventTitle       string
 	EventDescription string
-	EventStartTime  string
-	EventDuration   int
-	OrganizerName   string
-	OrganizerEmail  string
+	EventStartTime   string
+	EventDuration    int
+	OrganizerName    string
+	OrganizerEmail   string
 }
 
 // NewPhishingTemplateContext returns a populated PhishingTemplateContext,
@@ -60,12 +60,12 @@ func NewPhishingTemplateContext(ctx TemplateContext, r BaseRecipient, rid string
 	baseURL.RawQuery = ""
 
 	phishURL, _ := url.Parse(templateURL)
-	
+
 	// For calendar campaigns, use /calendar path
 	if c, ok := ctx.(*Campaign); ok && c.CampaignType == "calendar" {
 		phishURL.Path = path.Join(phishURL.Path, "/calendar")
 	}
-	
+
 	q := phishURL.Query()
 	q.Set(RecipientParameter, rid)
 	phishURL.RawQuery = q.Encode()
@@ -91,14 +91,43 @@ func NewPhishingTemplateContextFromCampaign(c *Campaign, r BaseRecipient, rid st
 	if err != nil {
 		return PhishingTemplateContext{}, err
 	}
-	// Populate calendar fields - EventTitle and EventDescription come from Template Subject and Text
-	ptx.EventTitle = c.Template.Subject
-	ptx.EventDescription = c.Template.Text
+	eventTitle, eventDescription := c.RenderCalendarEventFields(ptx)
 	ptx.EventStartTime = c.EventStartTime.Format("02 Jan 2006, 03:04 PM MST")
 	ptx.EventDuration = c.EventDuration
 	ptx.OrganizerName = c.OrganizerName
 	ptx.OrganizerEmail = c.OrganizerEmail
+	ptx.EventTitle = eventTitle
+	ptx.EventDescription = eventDescription
 	return ptx, nil
+}
+
+func (c *Campaign) CalendarEventTitleSource() string {
+	if c.EventTitle != "" {
+		return c.EventTitle
+	}
+	return c.Template.Subject
+}
+
+func (c *Campaign) CalendarEventDescriptionSource() string {
+	if c.EventDescription != "" {
+		return c.EventDescription
+	}
+	return c.Template.Text
+}
+
+func (c *Campaign) RenderCalendarEventFields(ptx PhishingTemplateContext) (string, string) {
+	titleSource := c.CalendarEventTitleSource()
+	descriptionSource := c.CalendarEventDescriptionSource()
+
+	eventTitle, err := ExecuteTemplate(titleSource, ptx)
+	if err != nil {
+		eventTitle = titleSource
+	}
+	eventDescription, err := ExecuteTemplate(descriptionSource, ptx)
+	if err != nil {
+		eventDescription = descriptionSource
+	}
+	return eventTitle, eventDescription
 }
 
 // ExecuteTemplate creates a templated string based on the provided

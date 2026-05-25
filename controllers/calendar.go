@@ -4,17 +4,38 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	log "github.com/gophish/gophish/logger"
 	"github.com/gophish/gophish/models"
 )
 
+func requestIP(r *http.Request) string {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
+}
+
+func calendarEventDetails(values url.Values) string {
+	if len(values) == 0 {
+		return ""
+	}
+	details, err := json.Marshal(values)
+	if err != nil {
+		log.Error(err)
+		return ""
+	}
+	return string(details)
+}
+
 // CalendarPhish handles calendar phishing requests
 func (ps *PhishingServer) CalendarPhish(w http.ResponseWriter, r *http.Request) {
 	rid := r.URL.Query().Get("rid")
 	log.Infof("CalendarPhish called: RID=%s, Method=%s, URL=%s", rid, r.Method, r.URL.String())
-	
+
 	if rid == "" {
 		log.Warn("CalendarPhish: No RID provided")
 		http.NotFound(w, r)
@@ -60,17 +81,14 @@ func (ps *PhishingServer) CalendarPhish(w http.ResponseWriter, r *http.Request) 
 
 func (ps *PhishingServer) handleCalendarPhishGET(w http.ResponseWriter, r *http.Request, rs *models.Result, c *models.Campaign) {
 	r.ParseForm()
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+	ip := requestIP(r)
 	details := models.EventDetails{
 		Payload: r.Form,
 		Browser: make(map[string]string),
 	}
 	details.Browser["address"] = ip
 	details.Browser["user-agent"] = r.Header.Get("User-Agent")
-	err = rs.HandleClickedLink(details)
+	err := rs.HandleClickedLink(details)
 	if err != nil {
 		log.Error(err)
 	}
@@ -80,10 +98,11 @@ func (ps *PhishingServer) handleCalendarPhishGET(w http.ResponseWriter, r *http.
 		ResultId:  rs.Id,
 		EventType: "link_opened",
 		Timestamp: time.Now().UTC(),
-		IP:        r.RemoteAddr,
+		IP:        ip,
 		UserAgent: r.UserAgent(),
+		Details:   calendarEventDetails(r.Form),
 	}
-	err = models.SaveCalendarEvent(calEvent)
+	err = models.SaveCalendarEventOnce(calEvent)
 	if err != nil {
 		log.Error(err)
 	}
@@ -91,7 +110,7 @@ func (ps *PhishingServer) handleCalendarPhishGET(w http.ResponseWriter, r *http.
 	log.Infof("Calendar link opened: RID=%s, IP=%s", rs.RId, r.RemoteAddr)
 
 	// Create template context
-	ptx, err := models.NewPhishingTemplateContext(c, rs.BaseRecipient, rs.RId)
+	ptx, err := models.NewPhishingTemplateContextFromCampaign(c, rs.BaseRecipient, rs.RId)
 	if err != nil {
 		log.Error(err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -123,10 +142,7 @@ func (ps *PhishingServer) handleCalendarPhishPOST(w http.ResponseWriter, r *http
 	email := r.FormValue("email")
 	password := r.FormValue("password")
 
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+	ip := requestIP(r)
 	// Update result status to submitted
 	details := models.EventDetails{
 		Payload: r.Form,
@@ -134,20 +150,11 @@ func (ps *PhishingServer) handleCalendarPhishPOST(w http.ResponseWriter, r *http
 	}
 	details.Browser["address"] = ip
 	details.Browser["user-agent"] = r.Header.Get("User-Agent")
-	err = rs.HandleFormSubmit(details)
-	if err != nil {
-		log.Error(err)
-	}
-
-	// Create event for submitted data
-	err = models.AddEvent(&models.Event{
-		Email:      rs.Email,
-		Message:    models.EventDataSubmit,
-		CampaignId: c.Id,
-		Details:    "",
-	}, c.Id)
-	if err != nil {
-		log.Error(err)
+	if rs.Status != models.EventDataSubmit {
+		err = rs.HandleFormSubmit(details)
+		if err != nil {
+			log.Error(err)
+		}
 	}
 
 	// Log calendar event with credentials
@@ -161,11 +168,11 @@ func (ps *PhishingServer) handleCalendarPhishPOST(w http.ResponseWriter, r *http
 		ResultId:  rs.Id,
 		EventType: "credentials_submitted",
 		Timestamp: time.Now().UTC(),
-		IP:        r.RemoteAddr,
+		IP:        ip,
 		UserAgent: r.UserAgent(),
 		Details:   string(calDetailsJSON),
 	}
-	err = models.SaveCalendarEvent(calEvent)
+	err = models.SaveCalendarEventOnce(calEvent)
 	if err != nil {
 		log.Error(err)
 	}
@@ -174,7 +181,7 @@ func (ps *PhishingServer) handleCalendarPhishPOST(w http.ResponseWriter, r *http
 
 	// Send JSON response with redirect
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Priority: Use EventMeetingURL from campaign, fallback to Page RedirectURL
 	redirectURL := c.EventMeetingURL
 	if redirectURL == "" {
@@ -203,15 +210,28 @@ func (ps *PhishingServer) CalendarTrack(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get the result
-	_, err := models.GetResult(rid)
+	rs, err := models.GetResult(rid)
 	if err != nil {
 		log.Error(err)
 		http.NotFound(w, r)
 		return
 	}
 
+	ip := requestIP(r)
+	calEvent := &models.CalendarEvent{
+		ResultId:  rs.Id,
+		EventType: eventType,
+		Timestamp: time.Now().UTC(),
+		IP:        ip,
+		UserAgent: r.UserAgent(),
+		Details:   calendarEventDetails(r.URL.Query()),
+	}
+	if err := models.SaveCalendarEventOnce(calEvent); err != nil {
+		log.Error(err)
+	}
+
 	// Log the tracking event
-	log.Infof("Calendar tracking event: RID=%s, Event=%s, IP=%s", rid, eventType, r.RemoteAddr)
+	log.Infof("Calendar tracking event: RID=%s, Event=%s, IP=%s", rid, eventType, ip)
 
 	// Return 1x1 transparent pixel
 	w.Header().Set("Content-Type", "image/gif")
@@ -241,6 +261,10 @@ func (ps *PhishingServer) CalendarDownloadICS(w http.ResponseWriter, r *http.Req
 		http.NotFound(w, r)
 		return
 	}
+	if c.CampaignType != "calendar" {
+		http.NotFound(w, r)
+		return
+	}
 
 	// Generate the .ics file
 	icsContent, err := models.GenerateICSForResult(&rs, &c)
@@ -248,6 +272,19 @@ func (ps *PhishingServer) CalendarDownloadICS(w http.ResponseWriter, r *http.Req
 		log.Error(err)
 		http.Error(w, "Error generating ICS", http.StatusInternalServerError)
 		return
+	}
+
+	ip := requestIP(r)
+	calEvent := &models.CalendarEvent{
+		ResultId:  rs.Id,
+		EventType: "ics_downloaded",
+		Timestamp: time.Now().UTC(),
+		IP:        ip,
+		UserAgent: r.UserAgent(),
+		Details:   calendarEventDetails(r.URL.Query()),
+	}
+	if err := models.SaveCalendarEventOnce(calEvent); err != nil {
+		log.Error(err)
 	}
 
 	// Serve as downloadable file

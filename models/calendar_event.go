@@ -29,6 +29,23 @@ func SaveCalendarEvent(ce *CalendarEvent) error {
 	return err
 }
 
+// SaveCalendarEventOnce saves the event only if this result/event type has not
+// already been recorded.
+func SaveCalendarEventOnce(ce *CalendarEvent) error {
+	var count int
+	err := db.Model(&CalendarEvent{}).
+		Where("result_id = ? AND event_type = ?", ce.ResultId, ce.EventType).
+		Count(&count).Error
+	if err != nil {
+		log.Error(err)
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return SaveCalendarEvent(ce)
+}
+
 // GetCalendarEventsByResult returns all calendar events for a given result ID
 func GetCalendarEventsByResult(resultId int64) ([]CalendarEvent, error) {
 	events := []CalendarEvent{}

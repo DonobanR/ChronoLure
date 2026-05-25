@@ -110,15 +110,16 @@ func (ps *PhishingServer) registerRoutes() {
 	router := mux.NewRouter()
 	fileServer := http.FileServer(unindexed.Dir("./static/endpoint/"))
 	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", fileServer))
+	// Calendar phishing routes must be registered before wildcard tracking
+	// routes so /calendar/track is not captured by /{path:.*}/track.
+	router.HandleFunc("/calendar", ps.CalendarPhish)
+	router.HandleFunc("/calendar/track", ps.CalendarTrack)
+	router.HandleFunc("/calendar/download", ps.CalendarDownloadICS)
 	router.HandleFunc("/track", ps.TrackHandler)
 	router.HandleFunc("/robots.txt", ps.RobotsHandler)
 	router.HandleFunc("/{path:.*}/track", ps.TrackHandler)
 	router.HandleFunc("/{path:.*}/report", ps.ReportHandler)
 	router.HandleFunc("/report", ps.ReportHandler)
-	// Calendar phishing routes
-	router.HandleFunc("/calendar", ps.CalendarPhish)
-	router.HandleFunc("/calendar/track", ps.CalendarTrack)
-	router.HandleFunc("/calendar/download", ps.CalendarDownloadICS)
 	router.HandleFunc("/{path:.*}", ps.PhishHandler)
 
 	// Setup GZIP compression

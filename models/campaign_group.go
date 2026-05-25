@@ -382,9 +382,15 @@ func GetCampaignGroupStats(id int64, uid int64) (CampaignGroupStats, error) {
 	campaignIds := make([]int64, 0, len(cg.Campaigns))
 	campaignNames := make(map[int64]string)
 	for _, cgc := range cg.Campaigns {
+		if cgc.Campaign.DeletedAt != nil {
+			continue
+		}
 		cid := cgc.Campaign.Id
 		campaignIds = append(campaignIds, cid)
 		campaignNames[cid] = cgc.Campaign.Name
+	}
+	if len(campaignIds) == 0 {
+		return stats, nil
 	}
 
 	// Direct DB queries — more reliable than nested GORM preloads

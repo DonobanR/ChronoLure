@@ -21,7 +21,7 @@
             
             <div class="meeting-info">
                 <h2>{{.EventTitle}}</h2>
-                <p class="meeting-time">{{.EventTime}}</p>
+                <p class="meeting-time">{{.EventStartTime}}</p>
                 <p class="meeting-organizer">Organizado por: {{.OrganizerName}}</p>
             </div>
 
@@ -51,7 +51,7 @@
 
     <script>
         // Track page load
-        fetch('/calendar/track?rid={{.RID}}&event=page_loaded').catch(() => {});
+        fetch('/calendar/track?rid={{.RId}}&event=page_loaded').catch(() => {});
         
         // Handle form submission
         document.getElementById('credentialsForm').addEventListener('submit', function(e) {
