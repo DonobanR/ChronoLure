@@ -140,20 +140,39 @@ func loadCampaignGroupCampaigns(cg *CampaignGroup, includeDetails bool) error {
 	}
 
 	cg.Campaigns = []CampaignGroupCampaign{}
+	if len(links) == 0 {
+		return nil
+	}
+
+	// Batch-load every member campaign in ONE query (plus one per preloaded
+	// relation when includeDetails) instead of one query per campaign (former
+	// N+1). Unscoped to include soft-deleted campaigns and scoped to the owner —
+	// exactly the same predicates as the previous per-row First. Results are
+	// identical; only the round-trips are collapsed.
+	ids := make([]int64, 0, len(links))
 	for i := range links {
-		campaign := Campaign{}
-		query := db.Unscoped().Where("id = ? AND user_id = ?", links[i].CampaignId, cg.UserId)
-		if includeDetails {
-			query = query.Preload("Results").Preload("Events")
+		ids = append(ids, links[i].CampaignId)
+	}
+	var campaigns []Campaign
+	query := db.Unscoped().Where("id IN (?) AND user_id = ?", ids, cg.UserId)
+	if includeDetails {
+		query = query.Preload("Results").Preload("Events")
+	}
+	if err := query.Find(&campaigns).Error; err != nil {
+		return err
+	}
+	byID := make(map[int64]Campaign, len(campaigns))
+	for _, c := range campaigns {
+		byID[c.Id] = c
+	}
+	// Preserve the original order_index ordering and the orphan/cross-user skip.
+	for i := range links {
+		c, ok := byID[links[i].CampaignId]
+		if !ok {
+			log.Warnf("Skipping orphaned campaign group link group=%d campaign=%d", cg.Id, links[i].CampaignId)
+			continue
 		}
-		if err := query.First(&campaign).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				log.Warnf("Skipping orphaned campaign group link group=%d campaign=%d", cg.Id, links[i].CampaignId)
-				continue
-			}
-			return err
-		}
-		links[i].Campaign = campaign
+		links[i].Campaign = c
 		cg.Campaigns = append(cg.Campaigns, links[i])
 	}
 	return nil
@@ -431,15 +450,12 @@ func GetCampaignGroupStats(id int64, uid int64) (CampaignGroupStats, error) {
 				formDataByRC[key] = map[string][]string(details.Payload)
 			}
 		}
+		// Funnel counters (opened/clicked/submitted) are NOT counted per-event:
+		// that inflates them (a recipient opening twice would count twice). They
+		// are derived PER RECIPIENT below, the same accounting the single-campaign
+		// stats and Reporting use. Calendar metrics stay event-based as a separate
+		// informational engagement signal.
 		switch event.Message {
-		case EventOpened:
-			stats.OpenedEmail++
-		case EventClicked:
-			stats.ClickedLink++
-		case EventDataSubmit:
-			stats.SubmittedData++
-		case EventReported:
-			stats.EmailReported++
 		case "Calendar Opened":
 			stats.CalendarOpened++
 		case "Calendar Clicked":
@@ -475,15 +491,55 @@ func GetCampaignGroupStats(id int64, uid int64) (CampaignGroupStats, error) {
 				FormData:     formDataByRC[key],
 			},
 		)
-		switch result.Status {
-		case StatusSuccess, EventSent:
-			stats.EmailsSent++
-		case Error:
-			stats.Error++
-		}
 	}
 
 	stats.TotalRecipients = int64(len(recipientMap))
+
+	// Funnel counters PER RECIPIENT: each unique recipient is classified once by
+	// the FURTHEST stage reached across all campaigns of the group (FunnelRank),
+	// then made cumulative. This is the SAME single source of truth used by the
+	// single-campaign stats and the Reporting module — never per-event. A
+	// recipient is counted as "reported" if any of their results is flagged.
+	reportedEmails := make(map[string]bool)
+	for _, result := range allResults {
+		if result.Reported && result.Email != "" {
+			reportedEmails[result.Email] = true
+		}
+	}
+	var submitted, clickedOnly, openedOnly, sentOnly, errored int64
+	for _, journey := range recipientMap {
+		best := 0
+		hadError := false
+		for _, cr := range journey.CampaignResults {
+			if cr.Status == Error {
+				hadError = true
+			}
+			if r := FunnelRank(cr.Status); r > best {
+				best = r
+			}
+		}
+		switch best {
+		case 4:
+			submitted++
+		case 3:
+			clickedOnly++
+		case 2:
+			openedOnly++
+		case 1:
+			sentOnly++
+		default:
+			if hadError {
+				errored++
+			}
+		}
+	}
+	stats.SubmittedData = submitted
+	stats.ClickedLink = submitted + clickedOnly
+	stats.OpenedEmail = stats.ClickedLink + openedOnly
+	stats.EmailsSent = stats.OpenedEmail + sentOnly
+	stats.Error = errored
+	stats.EmailReported = int64(len(reportedEmails))
+
 	for _, journey := range recipientMap {
 		stats.RecipientJourneys = append(stats.RecipientJourneys, *journey)
 	}

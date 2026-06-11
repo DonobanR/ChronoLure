@@ -300,43 +300,66 @@ func (c *Campaign) generateSendDate(idx int, totalRecipients int) time.Time {
 	return c.LaunchDate.Add(time.Duration(offset) * time.Minute)
 }
 
+// FunnelRank orders a result/event status by how far the recipient advanced in
+// the phishing funnel. It is the SINGLE canonical classification shared by the
+// campaign-group stats and the Reporting module, so every screen reports the
+// same per-recipient numbers. The single-campaign getCampaignStats below encodes
+// the same ordering directly in SQL (cumulative backfill). Higher = further.
+func FunnelRank(status string) int {
+	switch status {
+	case EventDataSubmit:
+		return 4
+	case EventClicked:
+		return 3
+	case EventOpened:
+		return 2
+	case EventSent, StatusSuccess:
+		return 1
+	default:
+		return 0
+	}
+}
+
 // getCampaignStats returns a CampaignStats object for the campaign with the given campaign ID.
 // It also backfills numbers as appropriate with a running total, so that the values are aggregated.
+//
+// The per-status counts come from a SINGLE `GROUP BY status` query instead of
+// one COUNT per status (audit item 3). The results are byte-identical to the
+// previous per-COUNT version: Total is the sum of all groups (= count(*),
+// including non-funnel statuses such as Scheduled/Sending), each funnel bucket
+// reads its exact status, and the same cumulative backfill is applied. Only
+// EmailReported stays a separate count because it is orthogonal to status.
 func getCampaignStats(cid int64) (CampaignStats, error) {
 	s := CampaignStats{}
-	query := db.Table("results").Where("campaign_id = ?", cid)
-	err := query.Count(&s.Total).Error
-	if err != nil {
+	type statusCount struct {
+		Status string
+		Count  int64
+	}
+	var rows []statusCount
+	if err := db.Table("results").
+		Select("status, count(*) as count").
+		Where("campaign_id = ?", cid).
+		Group("status").
+		Scan(&rows).Error; err != nil {
 		return s, err
 	}
-	query.Where("status=?", EventDataSubmit).Count(&s.SubmittedData)
-	if err != nil {
+	byStatus := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		byStatus[r.Status] = r.Count
+		s.Total += r.Count // sum of all statuses == count(*)
+	}
+	// Disjoint per-status counts, then the same cumulative backfill as before:
+	// submitted ⊆ clicked ⊆ opened ⊆ sent.
+	s.SubmittedData = byStatus[EventDataSubmit]
+	s.ClickedLink = byStatus[EventClicked] + s.SubmittedData
+	s.OpenedEmail = byStatus[EventOpened] + s.ClickedLink
+	s.EmailsSent = byStatus[EventSent] + s.OpenedEmail
+	s.Error = byStatus[Error]
+	// EmailReported is independent of status (any result may be reported).
+	if err := db.Table("results").Where("campaign_id = ? AND reported = ?", cid, true).Count(&s.EmailReported).Error; err != nil {
 		return s, err
 	}
-	query.Where("status=?", EventClicked).Count(&s.ClickedLink)
-	if err != nil {
-		return s, err
-	}
-	query.Where("reported=?", true).Count(&s.EmailReported)
-	if err != nil {
-		return s, err
-	}
-	// Every submitted data event implies they clicked the link
-	s.ClickedLink += s.SubmittedData
-	err = query.Where("status=?", EventOpened).Count(&s.OpenedEmail).Error
-	if err != nil {
-		return s, err
-	}
-	// Every clicked link event implies they opened the email
-	s.OpenedEmail += s.ClickedLink
-	err = query.Where("status=?", EventSent).Count(&s.EmailsSent).Error
-	if err != nil {
-		return s, err
-	}
-	// Every opened email event implies the email was sent
-	s.EmailsSent += s.OpenedEmail
-	err = query.Where("status=?", Error).Count(&s.Error).Error
-	return s, err
+	return s, nil
 }
 
 // GetCampaigns returns the campaigns owned by the given user.
@@ -433,9 +456,12 @@ func GetCampaignMailContext(id int64, uid int64) (Campaign, error) {
 }
 
 // GetCampaign returns the campaign, if it exists, specified by the given id and user_id.
+// Campaigns that have been soft-deleted (moved to trash) are excluded so they cannot
+// be retrieved through the normal read/tracking paths. Use GetTrashedCampaignByID to
+// operate on trashed campaigns explicitly.
 func GetCampaign(id int64, uid int64) (Campaign, error) {
 	c := Campaign{}
-	err := db.Where("id = ?", id).Where("user_id = ?", uid).Find(&c).Error
+	err := db.Scopes(ScopeCampaignsActive).Where("id = ?", id).Where("user_id = ?", uid).Find(&c).Error
 	if err != nil {
 		log.Errorf("%s: campaign not found", err)
 		return c, err
@@ -444,10 +470,34 @@ func GetCampaign(id int64, uid int64) (Campaign, error) {
 	return c, err
 }
 
-// GetCampaignResults returns just the campaign results for the given campaign
+// GetCampaignResultsAndEvents loads a campaign with ONLY its Results and Events
+// populated — the same campaign-row scoping and association queries as
+// GetCampaign/getDetails, but without Template/Page/SMTP/Attachments/Headers,
+// which reporting never uses. Used by the report data source to avoid loading
+// five unnecessary relations per generation (audit I-3). Returns identical
+// Results/Events to GetCampaign.
+func GetCampaignResultsAndEvents(id int64, uid int64) (Campaign, error) {
+	c := Campaign{}
+	err := db.Scopes(ScopeCampaignsActive).Where("id = ?", id).Where("user_id = ?", uid).Find(&c).Error
+	if err != nil {
+		log.Errorf("%s: campaign not found", err)
+		return c, err
+	}
+	if err = db.Model(&c).Related(&c.Results).Error; err != nil {
+		return c, err
+	}
+	if err = db.Model(&c).Related(&c.Events).Error; err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+// GetCampaignResults returns just the campaign results for the given campaign.
+// Soft-deleted (trashed) campaigns are excluded so their results are not exposed
+// through the normal API.
 func GetCampaignResults(id int64, uid int64) (CampaignResults, error) {
 	cr := CampaignResults{}
-	err := db.Table("campaigns").Where("id=? and user_id=?", id, uid).Find(&cr).Error
+	err := db.Table("campaigns").Where("id=? and user_id=? and deleted_at IS NULL", id, uid).Find(&cr).Error
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"campaign_id": id,

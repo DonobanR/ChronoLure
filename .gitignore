@@ -67,3 +67,20 @@ config.json
 # Build artifacts
 dist/
 build/
+
+# Reporting module — corporate content (templates, assets, generated reports)
+# must never be versioned. The repo ships only the generic engine; all
+# corporate knowledge lives in the database / outside git.
+/report_templates/
+/reports/
+/report_assets/
+*.docx
+*.xlsx
+*.xls
+*.csv
+# Corporate logos / evidence screenshots (the repo keeps only its own static PNGs)
+*.jpg
+*.jpeg
+
+# Local agent/session config (paths, command history) — not for the repo
+.claude/

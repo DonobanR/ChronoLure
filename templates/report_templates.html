@@ -1,0 +1,34 @@
+{{define "body"}}
+<div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
+    <div class="row">
+        <h1 class="page-header">Report Templates</h1>
+    </div>
+    <div id="flashes" class="row"></div>
+
+    <div class="panel panel-default">
+        <div class="panel-heading">Nueva plantilla</div>
+        <div class="panel-body">
+            <form class="form-inline" id="newTemplateForm">
+                <div class="form-group">
+                    <input type="text" class="form-control" id="newTemplateName" placeholder="Nombre de la plantilla" style="min-width:280px">
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fa fa-plus"></i> Crear</button>
+            </form>
+            <p class="help-block" style="margin-top:8px">
+                Sube un <strong>.docx</strong> con tokens <code>{{"{{EMPRESA}}"}}</code>, etc. y los slots de imagen
+                en el <em>Texto alternativo</em> de cada figura (<code>figura_1</code>…). El sistema valida tokens y slots al subir.
+            </p>
+        </div>
+    </div>
+
+    <h3>Plantillas</h3>
+    <div id="templatesList">
+        <p class="text-muted">Cargando…</p>
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script src="/js/dist/app/reportCommon.min.js"></script>
+<script src="/js/dist/app/report_templates.min.js"></script>
+{{end}}

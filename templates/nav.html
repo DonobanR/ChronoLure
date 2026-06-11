@@ -27,6 +27,14 @@
                 <li>
                     <a href="/sending_profiles">Sending Profiles</a>
                 </li>
+                {{if .ReportingEnabled}}
+                <li>
+                    <a href="/report-templates"><i class="fa fa-file-word-o"></i> Report Templates</a>
+                </li>
+                <li>
+                    <a href="/reports"><i class="fa fa-file-text-o"></i> Reports</a>
+                </li>
+                {{end}}
                 <li>
                     <a href="/settings">Account Settings</a>
                 </li>

@@ -18,9 +18,31 @@ func (s *ModelsSuite) TestCampaignGroupActiveMetrics(c *check.C) {
 	stats, err := GetCampaignGroupStats(group.Id, campaign.UserId)
 	c.Assert(err, check.Equals, nil)
 	c.Assert(stats.TotalRecipients, check.Equals, int64(len(campaign.Results)))
-	c.Assert(stats.ClickedLink, check.Equals, int64(1))
+	// Per-recipient cumulative funnel (same semantics as the single-campaign
+	// getCampaignStats): one recipient clicked and one submitted, so ClickedLink
+	// (reached at least clicked) = 2 and SubmittedData = 1.
+	c.Assert(stats.ClickedLink, check.Equals, int64(2))
 	c.Assert(stats.SubmittedData, check.Equals, int64(1))
 	c.Assert(len(stats.RecipientJourneys), check.Equals, len(campaign.Results))
+}
+
+// TestCampaignGroupFunnelIsPerRecipientNotPerEvent locks in the single source of
+// truth: a recipient who raises several "Email Opened" events must be counted
+// ONCE, exactly like the single-campaign stats and the Reporting module. The
+// pre-fix code counted per event and inflated this to 3.
+func (s *ModelsSuite) TestCampaignGroupFunnelIsPerRecipientNotPerEvent(c *check.C) {
+	campaign := s.createCampaign(c)
+	r0 := campaign.Results[0]
+	c.Assert(db.Model(&Result{}).Where("campaign_id = ? AND email = ?", campaign.Id, r0.Email).
+		Update("status", EventOpened).Error, check.Equals, nil)
+	for i := 0; i < 3; i++ {
+		c.Assert(db.Save(&Event{CampaignId: campaign.Id, Email: r0.Email, Time: time.Now().UTC(), Message: EventOpened}).Error, check.Equals, nil)
+	}
+	group := createCampaignGroupForCampaigns(c, campaign.UserId, "Per-recipient funnel group", campaign.Id)
+
+	stats, err := GetCampaignGroupStats(group.Id, campaign.UserId)
+	c.Assert(err, check.Equals, nil)
+	c.Assert(stats.OpenedEmail, check.Equals, int64(1))
 }
 
 func (s *ModelsSuite) TestCampaignGroupTrashedCampaignShownButExcludedFromMetrics(c *check.C) {

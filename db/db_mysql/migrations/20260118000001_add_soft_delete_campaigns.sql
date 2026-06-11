@@ -18,7 +18,7 @@ ALTER TABLE campaigns
 CREATE INDEX idx_campaigns_deleted_at ON campaigns(deleted_at);
 CREATE INDEX idx_campaigns_user_deleted ON campaigns(user_id, deleted_at);
 CREATE INDEX idx_campaigns_deleted_by_date ON campaigns(deleted_by, deleted_at);
-CREATE INDEX idx_campaigns_active_lookup ON campaigns(user_id, deleted_at, created_at);
+CREATE INDEX idx_campaigns_active_lookup ON campaigns(user_id, deleted_at, created_date);
 
 -- Foreign keys for deleted_by and restored_by
 ALTER TABLE campaigns

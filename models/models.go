@@ -186,7 +186,19 @@ func Setup(c *config.Config) error {
 	}
 	db.LogMode(false)
 	db.SetLogger(log.Logger)
-	db.DB().SetMaxOpenConns(1)
+	// Connection pool sizing (audit C-2). SQLite serializes writes at the file
+	// level, so more than one open connection causes "database is locked" errors
+	// under concurrency — keep it at 1. Server engines (MySQL) support real
+	// concurrency, so use a modest pool there so a heavy operation (e.g. a
+	// campaign-group report generation) does not block other users on the single
+	// shared connection.
+	if conf.DBName == "sqlite3" {
+		db.DB().SetMaxOpenConns(1)
+	} else {
+		db.DB().SetMaxOpenConns(25)
+		db.DB().SetMaxIdleConns(5)
+		db.DB().SetConnMaxLifetime(5 * time.Minute)
+	}
 	if err != nil {
 		log.Error(err)
 		return err

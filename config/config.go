@@ -42,6 +42,18 @@ type Config struct {
 	TrashPurgeEnabled   bool `json:"trash_purge_enabled"`
 	TrashPurgeInterval  int  `json:"trash_purge_interval_minutes"` // In minutes
 	TrashPurgeBatchSize int  `json:"trash_purge_batch_size"`
+	// Reporting module feature flag. Disabled by default: when off, no reporting
+	// routes, endpoints, pages or menus are exposed.
+	Reporting ReportingConfig `json:"reporting"`
+}
+
+// ReportingConfig holds the configuration for the DOCX reporting module.
+type ReportingConfig struct {
+	Enabled bool `json:"enabled"`
+	// EnableBlobDownload registers the render download endpoint that serves the
+	// stored DOCX byte-for-byte. Disabled by default; when off, the route is not
+	// registered at all (natural 404).
+	EnableBlobDownload bool `json:"enable_blob_download"`
 }
 
 // Version contains the current gophish version

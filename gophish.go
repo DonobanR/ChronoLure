@@ -112,7 +112,10 @@ func main() {
 	}
 
 	// Create our servers
-	adminOptions := []controllers.AdminServerOption{}
+	adminOptions := []controllers.AdminServerOption{
+		controllers.WithReporting(conf.Reporting.Enabled),
+		controllers.WithBlobDownload(conf.Reporting.EnableBlobDownload),
+	}
 	if *disableMailer {
 		adminOptions = append(adminOptions, controllers.WithWorker(nil))
 	}

@@ -18,9 +18,11 @@ type ServerOption func(*Server)
 // stopped. Rather, it's meant to be used as an http.Handler in the
 // AdminServer.
 type Server struct {
-	handler http.Handler
-	worker  worker.Worker
-	limiter *ratelimit.PostLimiter
+	handler             http.Handler
+	worker              worker.Worker
+	limiter             *ratelimit.PostLimiter
+	reportingEnabled    bool
+	blobDownloadEnabled bool
 }
 
 // NewServer returns a new instance of the API handler with the provided
@@ -49,6 +51,23 @@ func WithWorker(w worker.Worker) ServerOption {
 func WithLimiter(limiter *ratelimit.PostLimiter) ServerOption {
 	return func(as *Server) {
 		as.limiter = limiter
+	}
+}
+
+// WithReporting toggles the reporting module. When false, no reporting routes
+// are registered at all (so requests get a natural 404, not a 403), giving the
+// feature zero exposure surface.
+func WithReporting(enabled bool) ServerOption {
+	return func(as *Server) {
+		as.reportingEnabled = enabled
+	}
+}
+
+// WithBlobDownload toggles the render download endpoint (serving the stored
+// DOCX). When false, that route is not registered.
+func WithBlobDownload(enabled bool) ServerOption {
+	return func(as *Server) {
+		as.blobDownloadEnabled = enabled
 	}
 }
 
@@ -99,6 +118,11 @@ func (as *Server) registerRoutes() {
 	router.HandleFunc("/webhooks/", mid.Use(as.Webhooks, mid.RequirePermission(models.PermissionModifySystem)))
 	router.HandleFunc("/webhooks/{id:[0-9]+}/validate", mid.Use(as.ValidateWebhook, mid.RequirePermission(models.PermissionModifySystem)))
 	router.HandleFunc("/webhooks/{id:[0-9]+}", mid.Use(as.Webhook, mid.RequirePermission(models.PermissionModifySystem)))
+	// Reporting routes are registered only when the feature is enabled, so a
+	// standard install does not expose them at all.
+	if as.reportingEnabled {
+		as.registerReportRoutes(router)
+	}
 	as.handler = router
 }
 
