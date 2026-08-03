@@ -85,12 +85,23 @@ func (as *Server) registerRoutes() {
 	router.HandleFunc("/campaigns/trash", as.CampaignsTrash) // kept for backward compat
 	router.HandleFunc("/campaigns/{id:[0-9]+}", as.Campaign)
 	router.HandleFunc("/campaigns/{id:[0-9]+}/results", as.CampaignResults)
+	// CL-102R recipient soft-delete lifecycle
+	router.HandleFunc("/campaigns/{id:[0-9]+}/results/trashed", as.CampaignResultsTrashed)
+	router.HandleFunc("/campaigns/{id:[0-9]+}/results/bulk-delete", as.CampaignResultsBulkDelete)
+	router.HandleFunc("/campaigns/{id:[0-9]+}/results/delete-preview", as.CampaignResultsDeletePreview)
+	router.HandleFunc("/campaigns/{id:[0-9]+}/results/{rid}", as.CampaignResultDelete)
+	router.HandleFunc("/trash/recipient/restore-batch", as.RecipientRestoreBatch)
+	router.HandleFunc("/trash/recipient/purge-batch", as.RecipientPurgeBatch)
+	router.HandleFunc("/trash/recipient/{id:[0-9]+}/restore", as.RecipientRestore)
+	router.HandleFunc("/trash/recipient/{id:[0-9]+}/purge", as.RecipientPurge)
 	router.HandleFunc("/campaigns/{id:[0-9]+}/summary", as.CampaignSummary)
 	router.HandleFunc("/campaigns/{id:[0-9]+}/complete", as.CampaignComplete)
 	router.HandleFunc("/campaigns/{id:[0-9]+}/restore", as.CampaignRestore) // kept for backward compat
-	router.HandleFunc("/campaigns/{id:[0-9]+}/purge", as.CampaignPurge)    // kept for backward compat
+	router.HandleFunc("/campaigns/{id:[0-9]+}/purge", as.CampaignPurge)     // kept for backward compat
 	// Global unified trash
 	router.HandleFunc("/trash", as.GlobalTrash)
+	router.HandleFunc("/trash/counts", as.TrashCounts)
+	router.HandleFunc("/trash/recipient/batch/{batch_id}", as.RecipientBatchDetail)
 	router.HandleFunc("/trash/{type}/{id:[0-9]+}/restore", as.GlobalTrashRestore)
 	router.HandleFunc("/trash/{type}/{id:[0-9]+}/purge", as.GlobalTrashPurge)
 	// Campaign Groups endpoints
@@ -98,6 +109,7 @@ func (as *Server) registerRoutes() {
 	router.HandleFunc("/campaign-groups/summary", as.CampaignGroupsSummary)
 	router.HandleFunc("/campaign-groups/{id:[0-9]+}", as.CampaignGroup)
 	router.HandleFunc("/campaign-groups/{id:[0-9]+}/stats", as.CampaignGroupStats)
+	router.HandleFunc("/campaign-groups/{id:[0-9]+}/results/trashed", as.CampaignGroupResultsTrashed)
 	router.HandleFunc("/campaign-groups/{id:[0-9]+}/archive", as.CampaignGroupArchive)
 	router.HandleFunc("/groups/", as.Groups)
 	router.HandleFunc("/groups/summary", as.GroupsSummary)

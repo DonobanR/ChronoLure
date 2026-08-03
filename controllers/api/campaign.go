@@ -319,8 +319,10 @@ func (as *Server) CampaignPurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate confirmation (must match campaign name or "DELETE")
-	if req.Confirmation != c.Name && req.Confirmation != "DELETE" {
+	// Validate confirmation (must match campaign name or "DELETE").
+	// Normalize whitespace so names with trailing/double spaces (collapsed by
+	// the browser in the confirmation modal) can still be confirmed.
+	if normalizeConfirmation(req.Confirmation) != normalizeConfirmation(c.Name) && req.Confirmation != "DELETE" {
 		JSONResponse(w, models.Response{Success: false, Message: "Confirmation does not match"}, http.StatusBadRequest)
 		return
 	}

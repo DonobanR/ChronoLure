@@ -328,8 +328,9 @@ func PurgeCampaign(campaignID int64, userID int64, isAdmin bool) error {
 		return err
 	}
 
-	// 3. Results
-	if err := tx.Where("campaign_id = ?", campaignID).Delete(&Result{}).Error; err != nil {
+	// 3. Results — Unscoped() so trashed recipients (CL-102R soft-delete) are also
+	// hard-deleted in this purge, not left as soft-deleted orphans.
+	if err := tx.Unscoped().Where("campaign_id = ?", campaignID).Delete(&Result{}).Error; err != nil {
 		tx.Rollback()
 		log.Errorf("Failed to delete results for campaign %d: %v", campaignID, err)
 		return err
@@ -529,8 +530,9 @@ func PurgeSystemCampaign(campaignID int64) error {
 		return err
 	}
 
-	// 3. Results
-	if err := tx.Where("campaign_id = ?", campaignID).Delete(&Result{}).Error; err != nil {
+	// 3. Results — Unscoped() so trashed recipients (CL-102R soft-delete) are also
+	// hard-deleted in this purge, not left as soft-deleted orphans.
+	if err := tx.Unscoped().Where("campaign_id = ?", campaignID).Delete(&Result{}).Error; err != nil {
 		tx.Rollback()
 		log.Errorf("Failed to delete results for campaign %d: %v", campaignID, err)
 		return err

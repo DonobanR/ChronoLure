@@ -3,7 +3,7 @@
 
     <div class="row">
         <h1 class="page-header">
-            <i class="fa fa-trash-o"></i> Trash
+            <i class="fa fa-trash-o"></i> Papelera
         </h1>
     </div>
 
@@ -12,9 +12,9 @@
     <div class="row">
         <p class="text-muted">
             <i class="fa fa-info-circle"></i>
-            Deleted items are kept here until you permanently remove them.
-            Restoring an item puts it back in its original list.
-            <strong>Purging is irreversible.</strong>
+            Los elementos eliminados se guardan aquí hasta que los elimines definitivamente.
+            Restaurar un elemento lo devuelve a su lista original.
+            <strong>Eliminar definitivamente no se puede deshacer.</strong>
         </p>
     </div>
 
@@ -24,23 +24,42 @@
             <ul class="nav nav-pills" id="trashFilterTabs">
                 <li class="active" data-filter="all">
                     <a href="#" onclick="return false;">
-                        <i class="fa fa-list"></i> All
+                        <i class="fa fa-list"></i> Todo
                         <span class="badge" id="badge-all">0</span>
                     </a>
                 </li>
                 <li data-filter="campaign">
                     <a href="#" onclick="return false;">
-                        <i class="fa fa-bullhorn"></i> Campaigns
+                        <i class="fa fa-bullhorn"></i> Campañas
                         <span class="badge" id="badge-campaign">0</span>
                     </a>
                 </li>
                 <li data-filter="campaign_group">
                     <a href="#" onclick="return false;">
-                        <i class="fa fa-object-group"></i> Campaign Groups
+                        <i class="fa fa-object-group"></i> Grupos de campañas
                         <span class="badge" id="badge-campaign_group">0</span>
                     </a>
                 </li>
+                <!-- "Destinatarios" = rows of `results`. NEVER "Usuarios":
+                     Gophish already uses Users & Groups for target lists. -->
+                <li data-filter="recipient">
+                    <a href="#" onclick="return false;">
+                        <i class="fa fa-user-times"></i> Destinatarios
+                        <span class="badge" id="badge-recipient">0</span>
+                    </a>
+                </li>
             </ul>
+            <div class="text-muted" id="trash-counts-note" style="font-size:.9em;margin-top:4px"></div>
+            <!-- Filters for the Destinatarios tab (deep-linkable) -->
+            <div id="recipient-filters" style="display:none;margin-top:8px">
+                <div class="input-group" style="max-width:420px">
+                    <span class="input-group-addon"><i class="fa fa-search"></i></span>
+                    <input type="text" class="form-control" id="recipient-search"
+                           placeholder="Buscar por correo…" aria-label="Buscar destinatario por correo"
+                           style="min-height:44px">
+                </div>
+                <div class="text-muted" id="recipient-filter-context" style="font-size:.9em;margin-top:4px"></div>
+            </div>
         </div>
     </div>
 
@@ -53,7 +72,9 @@
     <div id="trash-empty" class="row" style="display:none;">
         <div class="alert alert-info">
             <i class="fa fa-check-circle"></i>
-            Nothing in the trash&mdash;all clean!
+            <span id="trash-empty-text"></span>
+            <div id="trash-empty-hint" class="text-muted" style="margin-top:6px"></div>
+            <div id="trash-empty-actions" style="margin-top:8px"></div>
         </div>
     </div>
 
@@ -61,10 +82,10 @@
     <div id="trash-error" class="row" style="display:none;">
         <div class="alert alert-danger">
             <i class="fa fa-exclamation-circle"></i>
-            <span id="trash-error-text">Error loading trash.</span>
+            <span id="trash-error-text">No se pudo cargar la papelera.</span>
             <button class="btn btn-sm btn-default" style="margin-left:8px;"
                     onclick="loadTrash()">
-                <i class="fa fa-refresh"></i> Retry
+                <i class="fa fa-refresh"></i> Reintentar
             </button>
         </div>
     </div>
@@ -75,11 +96,11 @@
                style="display:none;">
             <thead>
                 <tr>
-                    <th class="col-md-1">Type</th>
-                    <th class="col-md-4">Name</th>
-                    <th class="col-md-2">Deleted At</th>
-                    <th class="col-md-2">Reason</th>
-                    <th class="col-md-3 no-sort">Actions</th>
+                    <th class="col-md-1">Tipo</th>
+                    <th class="col-md-4">Nombre</th>
+                    <th class="col-md-2">Eliminado el</th>
+                    <th class="col-md-2">Motivo</th>
+                    <th class="col-md-3 no-sort">Acciones</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -97,12 +118,12 @@
                     <span>&times;</span>
                 </button>
                 <h4 class="modal-title">
-                    <i class="fa fa-undo"></i> Restore Item
+                    <i class="fa fa-undo"></i> Restaurar elemento
                 </h4>
             </div>
             <div class="modal-body">
                 <p>
-                    Restore <strong id="restore-item-name"></strong>?
+                    ¿Restaurar <strong id="restore-item-name"></strong>?
                 </p>
                 <p class="text-info">
                     <i class="fa fa-info-circle"></i>
@@ -116,9 +137,9 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-default"
-                        data-dismiss="modal">Cancel</button>
+                        data-dismiss="modal">Cancelar</button>
                 <button type="button" class="btn btn-success" id="confirm-restore">
-                    <i class="fa fa-undo"></i> Restore
+                    <i class="fa fa-undo"></i> Restaurar
                 </button>
             </div>
         </div>
@@ -151,16 +172,16 @@
                             style="font-size:1.2em;"></strong>
                 </p>
                 <hr>
-                <p><strong>Type the name exactly to confirm:</strong></p>
+                <p><strong>Escribe el nombre exactamente para confirmar:</strong></p>
                 <input type="text" class="form-control" id="purge-confirm-input"
-                       placeholder="Type the name here" autocomplete="off">
+                       placeholder="Escribe el nombre aquí" autocomplete="off">
                 <p class="text-muted" style="margin-top:5px;">
-                    <small>Expected: <code id="purge-expected-name"></code></small>
+                    <small>Esperado: <code id="purge-expected-name"></code></small>
                 </p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-default"
-                        data-dismiss="modal">Cancel</button>
+                        data-dismiss="modal">Cancelar</button>
                 <button type="button" class="btn btn-danger" id="confirm-purge"
                         disabled>
                     <i class="fa fa-trash"></i> Delete Forever
@@ -172,5 +193,6 @@
 {{end}}
 
 {{define "scripts"}}
-<script src="/js/dist/app/trash.min.js"></script>
+<script src="/js/dist/app/trash_helpers.min.js?v=cl102rb"></script>
+<script src="/js/dist/app/trash.min.js?v=cl102rb"></script>
 {{end}}

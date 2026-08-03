@@ -417,14 +417,20 @@ func GetCampaignGroupStats(id int64, uid int64) (CampaignGroupStats, error) {
 
 	// Direct DB queries — more reliable than nested GORM preloads
 	var allEvents []Event
+	// Events trap (CL-102R §5.2): a deleted recipient must leave the numerator too,
+	// or its events would inflate the group funnel (percentages > 100%). Exclude
+	// events whose (campaign_id, email) matches a soft-deleted result.
 	if err = db.Where("campaign_id IN (?) AND email != ''", campaignIds).
+		Where("NOT EXISTS (SELECT 1 FROM results r WHERE r.campaign_id = events.campaign_id AND r.email = events.email AND r.deleted_at IS NOT NULL)").
 		Order("time ASC").Find(&allEvents).Error; err != nil {
 		log.Error(err)
 		return stats, err
 	}
 
 	var allResults []Result
-	if err = db.Where("campaign_id IN (?)", campaignIds).
+	// Soft-deleted (trashed) recipients are dropped so the group funnel, stats
+	// and Recipients stay consistent with the campaign view (CL-102R).
+	if err = db.Where("campaign_id IN (?) AND deleted_at IS NULL", campaignIds).
 		Find(&allResults).Error; err != nil {
 		log.Error(err)
 		return stats, err

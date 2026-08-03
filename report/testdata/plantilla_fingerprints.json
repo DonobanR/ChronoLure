@@ -1,0 +1,41 @@
+{
+  "_comment": "Fingerprints declarados de plantilla_reina.docx. Si el test falla, la plantilla cambió: si el cambio es deliberado, actualiza 'current' aquí y añade una entrada en 'history'.",
+  "current": {
+    "file": "plantilla_reina.docx",
+    "sha256": "044e04a04090f0658983fb176098156b1fa365ffdfbcbbe97e2899aace4ef119",
+    "state": "CL-103 final: la frase fija SUSTITUYE al párrafo de Ejecución ({{SUPLANTANDO}}, {{EMPRESA}}, {{COMUNICADO}}). NO declara PARRAFO_EJECUCION ni TABLA_ANEXO. figura_10 presente (slot deprecado).",
+    "recorded": "2026-07-30"
+  },
+  "history": [
+    {
+      "file": "plantilla_reina.docx.bak",
+      "sha256": "7464d589cf7e5b2baacbf4090c4fd46f0a75bd2acd4243a784ad1db794473508",
+      "state": "original pre-CL-103 (tiene PARRAFO_EJECUCION y figura_10)",
+      "recorded": "2026-06-06"
+    },
+    {
+      "file": "plantilla_reina.CL103+CL105.docx",
+      "sha256": "96ae3b942d2d74d457ca667d3ae45f875d6d74196c021063b28d5d552b6b7a5c",
+      "state": "CL-103 (frase fija que SUSTITUYÓ el párrafo editable) + CL-105 (figura_10 -> TABLA_ANEXO). Estado retirado: mezclaba dos tickets.",
+      "recorded": "2026-07-29"
+    },
+    {
+      "file": "plantilla_reina.CL103-B-v9.docx",
+      "sha256": "b4d940eddb06915ec26575cc7dcb368d414c866b79c9ab40b3ad734a0c98e507",
+      "state": "CL-103 opción B (token editable + frase fija en párrafo aparte). Retirado: el párrafo de Ejecución es texto fijo, el editable no debía volver.",
+      "recorded": "2026-07-30"
+    },
+    {
+      "file": "plantilla_reina.CL105.docx",
+      "sha256": "7b9425de05ed63d1c7aa8995c097a300a2afa5364c8ab7bbfe27dcf256b8d3d0",
+      "state": "CL-105: la imagen figura_10 del anexo S9 se sustituye por el marcador {{TABLA_ANEXO}}; el pie 'Figura {{NUM_FIGURA_ANEXO}}' queda intacto (D3). Subida como v11 INACTIVA; la activa sigue siendo la v10.",
+      "recorded": "2026-07-30"
+    },
+    {
+      "file": "plantilla_reina.CL105-b.docx",
+      "sha256": "f15bdb98e66fb1d2da8ad4fbe8e02ebaa7ff30a8dd42afdc36ca1a9092a548ad",
+      "state": "CL-105 (2ª iteración): igual que CL105 pero el pie del anexo pasa a 'Evidencia de los destinatarios con mayor exposición', porque la tabla ya no es solo de quienes enviaron datos. Subida como v12 INACTIVA.",
+      "recorded": "2026-07-30"
+    }
+  ]
+}

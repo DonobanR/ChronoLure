@@ -46,3 +46,15 @@ func TestBuildVarsCoversVocabulary(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildVarsImpersonatedDept covers CL-103: the manual "who was impersonated"
+// value fills the {{DEPTO_SUPLANTADO}} token used in the S3 Ejecución section.
+func TestBuildVarsExecutionTokens(t *testing.T) {
+	vars := BuildVars(VarInput{ImpersonatedAs: "Recursos Humanos", Communique: "comunicado interno", Funnel: FunnelMetrics{}})
+	if got := vars["SUPLANTANDO"]; got != "Recursos Humanos" {
+		t.Fatalf("SUPLANTANDO = %q, want %q", got, "Recursos Humanos")
+	}
+	if got := vars["COMUNICADO"]; got != "comunicado interno" {
+		t.Fatalf("COMUNICADO = %q, want %q", got, "comunicado interno")
+	}
+}

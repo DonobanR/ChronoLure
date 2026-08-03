@@ -92,9 +92,14 @@ type Report struct {
 	UsersWith2FA int64     `json:"users_with_2fa" gorm:"column:users_with_2fa"`
 	IntroExec    string    `json:"intro_exec" gorm:"column:intro_exec"`
 	TextPunto1   string    `json:"text_punto_1" gorm:"column:text_punto_1"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt    time.Time `json:"updated_at" gorm:"column:updated_at"`
+	// ImpersonatedAs / Communique fill the S3 Ejecución fixed paragraph (CL-103):
+	// who was impersonated ({{SUPLANTANDO}}) and which communiqué was faked
+	// ({{COMUNICADO}}). {{EMPRESA}} is already covered by CompanyName.
+	ImpersonatedAs string    `json:"impersonated_as" gorm:"column:impersonated_as"`
+	Communique     string    `json:"communique" gorm:"column:communique"`
+	Status         string    `json:"status"`
+	CreatedAt      time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt      time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // TableName specifies the database table for Report.
@@ -204,6 +209,7 @@ func blobExists(digest string) (bool, error) {
 //   - report_assets.content_sha256
 //   - report_render_assets.content_sha256
 //   - report_renders.output_sha256
+//
 // Blobs in that set are never deleted. It is a callable utility (not scheduled).
 func GarbageCollectReportBlobs() (int64, error) {
 	const referenced = `
@@ -211,7 +217,7 @@ func GarbageCollectReportBlobs() (int64, error) {
 		UNION SELECT content_sha256 FROM report_assets WHERE content_sha256 IS NOT NULL
 		UNION SELECT content_sha256 FROM report_render_assets WHERE content_sha256 IS NOT NULL
 		UNION SELECT output_sha256 FROM report_renders WHERE output_sha256 IS NOT NULL`
-	res := db.Exec("DELETE FROM report_blobs WHERE sha256 NOT IN ("+referenced+")")
+	res := db.Exec("DELETE FROM report_blobs WHERE sha256 NOT IN (" + referenced + ")")
 	return res.RowsAffected, res.Error
 }
 
@@ -402,18 +408,20 @@ func DeleteReportTemplate(id, uid int64, force bool) error {
 func UpdateReport(r *Report, uid int64) error {
 	return db.Model(&Report{}).Where("id = ? AND user_id = ?", r.Id, uid).
 		Update(map[string]interface{}{
-			"subject_kind":   r.SubjectKind,
-			"subject_id":     r.SubjectId,
-			"template_id":    r.TemplateId,
-			"company_name":   r.CompanyName,
-			"prepared_by":    r.PreparedBy,
-			"report_date":    r.ReportDate,
-			"executed_from":  r.ExecutedFrom,
-			"executed_to":    r.ExecutedTo,
-			"users_with_2fa": r.UsersWith2FA,
-			"intro_exec":     r.IntroExec,
-			"text_punto_1":   r.TextPunto1,
-			"updated_at":     time.Now().UTC(),
+			"subject_kind":    r.SubjectKind,
+			"subject_id":      r.SubjectId,
+			"template_id":     r.TemplateId,
+			"company_name":    r.CompanyName,
+			"prepared_by":     r.PreparedBy,
+			"report_date":     r.ReportDate,
+			"executed_from":   r.ExecutedFrom,
+			"executed_to":     r.ExecutedTo,
+			"users_with_2fa":  r.UsersWith2FA,
+			"intro_exec":      r.IntroExec,
+			"text_punto_1":    r.TextPunto1,
+			"impersonated_as": r.ImpersonatedAs,
+			"communique":      r.Communique,
+			"updated_at":      time.Now().UTC(),
 		}).Error
 }
 
@@ -458,6 +466,13 @@ func DeleteReport(id, uid int64, force bool) error {
 }
 
 // UpsertReportAsset binds (or replaces) the working image for a draft slot.
+// DeleteReportAsset removes the working image bound to one slot of a draft. It
+// touches ONLY that slot, and never the content-addressed blob: other reports (and
+// frozen renders) may reference the same bytes.
+func DeleteReportAsset(reportID int64, slot string) error {
+	return db.Where("report_id = ? AND slot = ?", reportID, slot).Delete(&ReportAsset{}).Error
+}
+
 func UpsertReportAsset(reportID int64, slot, sha, mime string) error {
 	a := ReportAsset{}
 	err := db.Where("report_id = ? AND slot = ?", reportID, slot).First(&a).Error

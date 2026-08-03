@@ -36,6 +36,9 @@
         </div>
         <br />
         
+        <!-- CL-102R-b: persistent indicator for trashed recipients of the group -->
+        <div class="row"><div id="groupRecipientTrashBanner" style="display:none"></div></div>
+
         <!-- Campaign List Section -->
         <div class="row">
             <h2>Linked Campaigns</h2>
@@ -285,5 +288,6 @@
 
 {{end}}
 {{define "scripts"}}
-<script src="/js/dist/app/campaign_group_results.min.js"></script>
+<script src="/js/dist/app/trash_helpers.min.js?v=cl102rb"></script>
+<script src="/js/dist/app/campaign_group_results.min.js?v=cl102rb"></script>
 {{end}}

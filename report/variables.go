@@ -15,9 +15,11 @@ type VarInput struct {
 	ReportDate      time.Time
 	ExecutedFrom    time.Time
 	ExecutedTo      time.Time
-	IntroExec       string
-	TextPunto1      string
-	Had2FA          bool
+	IntroExec      string
+	ImpersonatedAs string
+	Communique     string
+	TextPunto1     string
+	Had2FA         bool
 	TotalRecipients int64
 	Funnel          FunnelMetrics
 }
@@ -54,6 +56,8 @@ func BuildVars(in VarInput) map[string]string {
 		"RANGO_FECHAS":      rangoFechasES(in.ExecutedFrom, in.ExecutedTo),
 		"N_USUARIOS":        itoa(in.TotalRecipients),
 		"PARRAFO_EJECUCION": in.IntroExec,
+		"SUPLANTANDO":       in.ImpersonatedAs,
+		"COMUNICADO":        in.Communique,
 		"TEXTO_PUNTO_1":     in.TextPunto1,
 		"R_IGNORADO":        itoa(f.Ignorado),
 		"R_ABIERTO":         itoa(f.Abierto),

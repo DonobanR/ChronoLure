@@ -240,11 +240,20 @@ window.showPurgeModal = function(idx) {
     }, 500);
 }
 
+// Normalize whitespace so names with trailing/double spaces (which the browser
+// collapses when rendering the modal) can still be matched by what the user types.
+function normalizeConfirmName(s) {
+    return (s || '')
+        .replace(/[\u00AD\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 // Validate purge confirmation text
 $("#purgeConfirmText").on('input', function() {
     var campaign = trashCampaigns[currentCampaignIndex];
     var inputText = $(this).val();
-    var isValid = inputText === campaign.name;
+    var isValid = normalizeConfirmName(inputText) === normalizeConfirmName(campaign.name);
     
     $("#confirmPurge").prop('disabled', !isValid);
 });

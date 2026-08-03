@@ -25,6 +25,7 @@
     "gulp-rename": "^1.4.0",
     "gulp-uglify-es": "^3.0.0",
     "gulp-wrap": "^0.15.0",
+    "jsdom": "^22.1.0",
     "jshint": "^2.13.4",
     "jshint-stylish": "^2.2.1",
     "webpack": "^4.32.2",

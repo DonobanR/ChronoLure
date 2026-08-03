@@ -41,20 +41,47 @@ type TrashItem struct {
 	DeletedAt    time.Time `json:"deleted_at"`
 	DeletedBy    *int64    `json:"deleted_by,omitempty"`
 	DeleteReason string    `json:"delete_reason,omitempty"`
+	// The fields below carry the extra context the recipient type needs
+	// (CL-102R addendum §4). Context is the human-readable parent (campaign name);
+	// BatchID groups a bulk deletion so the UI can roll it up and restore/purge it
+	// as one unit. ParentTrashed lets the UI DISABLE (never hide) "Restaurar" when
+	// the recipient's campaign is itself in the Trash.
+	Context       string `json:"context,omitempty"`
+	BatchID       string `json:"batch_id,omitempty"`
+	CampaignID    int64  `json:"campaign_id,omitempty"`
+	CampaignName  string `json:"campaign_name,omitempty"`
+	GroupID       *int64 `json:"group_id,omitempty"`
+	GroupName     string `json:"group_name,omitempty"`
+	Scope         string `json:"scope,omitempty"`
+	DeletedByName string `json:"deleted_by_name,omitempty"`
+	ParentTrashed bool   `json:"parent_campaign_trashed,omitempty"`
 }
 
 // TrashItemType constants — use these in switch statements throughout.
 const (
 	TrashTypeCampaign      = "campaign"
 	TrashTypeCampaignGroup = "campaign_group"
+	TrashTypeRecipient     = "recipient"
 )
 
 // ─── Aggregator ───────────────────────────────────────────────────────────────
 
-// GetTrashItems returns trashed items for a user, optionally filtered by type.
-// filterType: "all" | "campaign" | "campaign_group" (empty == "all").
+// GetTrashItems returns trashed items for a user, optionally filtered by type,
+// without pagination. Kept for callers that need the whole list.
+// filterType: "all" | "campaign" | "campaign_group" | "recipient" (empty == "all").
 // Results are ordered by deleted_at DESC.
 func GetTrashItems(userID int64, filterType string) ([]TrashItem, error) {
+	items, _, err := GetTrashItemsFiltered(userID, filterType, RecipientTrashQuery{})
+	return items, err
+}
+
+// GetTrashItemsFiltered is GetTrashItems plus the recipient filters/pagination
+// of addendum §4 (campaign_id, group_id, q, offset/limit). It also returns the
+// TOTAL number of matching recipients — needed for the pager and the tab badge,
+// which must reflect all matches, not just the current page. The filters and
+// pagination apply to recipients only; campaigns and groups are never paginated
+// (they were fine without it and adding it would change their contract).
+func GetTrashItemsFiltered(userID int64, filterType string, rq RecipientTrashQuery) ([]TrashItem, int64, error) {
 	if filterType == "" {
 		filterType = "all"
 	}
@@ -62,8 +89,9 @@ func GetTrashItems(userID int64, filterType string) ([]TrashItem, error) {
 	// Reject unknown filter types up front
 	if filterType != "all" &&
 		filterType != TrashTypeCampaign &&
-		filterType != TrashTypeCampaignGroup {
-		return nil, errors.New("unknown trash type: " + filterType)
+		filterType != TrashTypeCampaignGroup &&
+		filterType != TrashTypeRecipient {
+		return nil, 0, errors.New("unknown trash type: " + filterType)
 	}
 
 	items := []TrashItem{}
@@ -74,7 +102,7 @@ func GetTrashItems(userID int64, filterType string) ([]TrashItem, error) {
 		campaigns, err := GetTrashedCampaigns(userID)
 		if err != nil {
 			log.Errorf("GetTrashItems: campaigns: %v", err)
-			return nil, err
+			return nil, 0, err
 		}
 		for _, c := range campaigns {
 			var at time.Time
@@ -96,7 +124,7 @@ func GetTrashItems(userID int64, filterType string) ([]TrashItem, error) {
 		groups, err := GetTrashedCampaignGroups(userID)
 		if err != nil {
 			log.Errorf("GetTrashItems: campaign_groups: %v", err)
-			return nil, err
+			return nil, 0, err
 		}
 		for _, g := range groups {
 			var at time.Time
@@ -114,12 +142,45 @@ func GetTrashItems(userID int64, filterType string) ([]TrashItem, error) {
 		}
 	}
 
+	var recipientTotal int64
+	if filterType == TrashTypeRecipient || filterType == "all" {
+		recips, total, err := GetTrashedRecipients(userID, rq)
+		if err != nil {
+			log.Errorf("GetTrashItems: recipients: %v", err)
+			return nil, 0, err
+		}
+		recipientTotal = total
+		for _, rr := range recips {
+			var at time.Time
+			if rr.DeletedAt != nil {
+				at = *rr.DeletedAt
+			}
+			items = append(items, TrashItem{
+				Type:          TrashTypeRecipient,
+				ID:            rr.ResultId,
+				Name:          rr.Email,
+				DeletedAt:     at,
+				DeletedBy:     rr.DeletedBy,
+				DeleteReason:  rr.Reason,
+				Context:       rr.CampaignName,
+				BatchID:       rr.BatchId,
+				CampaignID:    rr.CampaignId,
+				CampaignName:  rr.CampaignName,
+				GroupID:       rr.GroupId,
+				GroupName:     rr.GroupName,
+				Scope:         rr.Scope,
+				DeletedByName: rr.DeletedByName,
+				ParentTrashed: rr.ParentCampaignTrashed,
+			})
+		}
+	}
+
 	// Sort by deleted_at DESC — most recently deleted first
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].DeletedAt.After(items[j].DeletedAt)
 	})
 
-	return items, nil
+	return items, recipientTotal, nil
 }
 
 // ─── Dispatcher: Restore ──────────────────────────────────────────────────────
@@ -142,6 +203,11 @@ func RestoreTrashItem(userID int64, itemType string, itemID int64) (bool, string
 			return false, "", nil, err
 		}
 		return result.NameChanged, result.NewName, result.Warnings, nil
+
+	case TrashTypeRecipient:
+		// Recipients never get renamed on restore (no name-conflict rule); the
+		// nested-trash and duplicate-email guards live in RestoreResultByID.
+		return false, "", nil, RestoreResultByID(userID, itemID)
 
 	default:
 		return false, "", nil, errors.New("unknown trash type: " + itemType)

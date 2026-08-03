@@ -431,10 +431,14 @@ func (m *MailLog) generateCalendarEmail(msg *gomail.Message, r *Result, c *Campa
 // GetQueuedMailLogs returns the mail logs that are queued up for the given minute.
 func GetQueuedMailLogs(t time.Time) ([]*MailLog, error) {
 	ms := []*MailLog{}
+	// Also skip mail_logs whose recipient result was soft-deleted (CL-102R): a
+	// deleted recipient must never receive the email, even mid-campaign. The
+	// pending mail_logs are also removed in the delete tx; this is defense in depth.
 	err := db.Table("mail_logs").
 		Select("mail_logs.*").
 		Joins("JOIN campaigns ON campaigns.id = mail_logs.campaign_id").
-		Where("mail_logs.send_date <= ? AND mail_logs.processing = ? AND campaigns.deleted_at IS NULL", t, false).
+		Joins("LEFT JOIN results ON results.campaign_id = mail_logs.campaign_id AND results.r_id = mail_logs.r_id").
+		Where("mail_logs.send_date <= ? AND mail_logs.processing = ? AND campaigns.deleted_at IS NULL AND results.deleted_at IS NULL", t, false).
 		Find(&ms).Error
 	if err != nil {
 		log.Warn(err)

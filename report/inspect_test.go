@@ -143,3 +143,18 @@ func contains(xs []string, want string) bool {
 	}
 	return false
 }
+
+// TestInspectKnowsExecutionTokens covers CL-103: {{DEPTO_SUPLANTADO}} is a
+// known token, never reported as unknown.
+func TestInspectKnowsExecutionTokens(t *testing.T) {
+	insp, err := Inspect(buildDocx(t, run("{{SUPLANTANDO}} {{COMUNICADO}}")))
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if !contains(insp.Tokens, "SUPLANTANDO") || !contains(insp.Tokens, "COMUNICADO") {
+		t.Fatalf("expected SUPLANTANDO+COMUNICADO in tokens, got %v", insp.Tokens)
+	}
+	if contains(insp.Unknown, "SUPLANTANDO") || contains(insp.Unknown, "COMUNICADO") {
+		t.Fatalf("SUPLANTANDO/COMUNICADO should be known tokens, got Unknown=%v", insp.Unknown)
+	}
+}

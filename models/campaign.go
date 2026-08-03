@@ -338,7 +338,7 @@ func getCampaignStats(cid int64) (CampaignStats, error) {
 	var rows []statusCount
 	if err := db.Table("results").
 		Select("status, count(*) as count").
-		Where("campaign_id = ?", cid).
+		Where("campaign_id = ? AND deleted_at IS NULL", cid).
 		Group("status").
 		Scan(&rows).Error; err != nil {
 		return s, err
@@ -356,7 +356,7 @@ func getCampaignStats(cid int64) (CampaignStats, error) {
 	s.EmailsSent = byStatus[EventSent] + s.OpenedEmail
 	s.Error = byStatus[Error]
 	// EmailReported is independent of status (any result may be reported).
-	if err := db.Table("results").Where("campaign_id = ? AND reported = ?", cid, true).Count(&s.EmailReported).Error; err != nil {
+	if err := db.Table("results").Where("campaign_id = ? AND reported = ? AND deleted_at IS NULL", cid, true).Count(&s.EmailReported).Error; err != nil {
 		return s, err
 	}
 	return s, nil
@@ -483,7 +483,9 @@ func GetCampaignResultsAndEvents(id int64, uid int64) (Campaign, error) {
 		log.Errorf("%s: campaign not found", err)
 		return c, err
 	}
-	if err = db.Model(&c).Related(&c.Results).Error; err != nil {
+	// Soft-deleted (trashed) recipients are dropped from the report's
+	// per-recipient universe so funnel/Excel/annex stay consistent (CL-102R).
+	if err = db.Scopes(ScopeActiveResults).Model(&c).Related(&c.Results).Error; err != nil {
 		return c, err
 	}
 	if err = db.Model(&c).Related(&c.Events).Error; err != nil {
@@ -505,12 +507,17 @@ func GetCampaignResults(id int64, uid int64) (CampaignResults, error) {
 		}).Error(err)
 		return cr, err
 	}
-	err = db.Table("results").Where("campaign_id=? and user_id=?", cr.Id, uid).Find(&cr.Results).Error
+	// Soft-deleted recipients disappear from the results table/CSV (CL-102R).
+	err = db.Table("results").Where("campaign_id=? and user_id=? and deleted_at IS NULL", cr.Id, uid).Find(&cr.Results).Error
 	if err != nil {
 		log.Errorf("%s: results not found for campaign", err)
 		return cr, err
 	}
-	err = db.Table("events").Where("campaign_id=?", cr.Id).Find(&cr.Events).Error
+	// Exclude events of deleted recipients so the timeline/CSV never shows a
+	// numerator without its denominator (the events trap, see CL-102R §5.2).
+	err = db.Table("events").
+		Where("campaign_id=? AND NOT EXISTS (SELECT 1 FROM results r WHERE r.campaign_id = events.campaign_id AND r.email = events.email AND r.deleted_at IS NOT NULL)", cr.Id).
+		Find(&cr.Events).Error
 	if err != nil {
 		log.Errorf("%s: events not found for campaign", err)
 		return cr, err
@@ -709,8 +716,10 @@ func DeleteCampaign(id int64) error {
 	log.WithFields(logrus.Fields{
 		"campaign_id": id,
 	}).Info("Deleting campaign")
-	// Delete all the campaign results
-	err := db.Where("campaign_id=?", id).Delete(&Result{}).Error
+	// Delete all the campaign results. Unscoped() because results now carry a
+	// gorm soft-delete field (deleted_at, CL-102R); without it this would only
+	// soft-delete them, leaving orphans on a hard campaign delete.
+	err := db.Unscoped().Where("campaign_id=?", id).Delete(&Result{}).Error
 	if err != nil {
 		log.Error(err)
 		return err

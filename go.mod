@@ -27,6 +27,7 @@ require (
 	github.com/stretchr/testify v1.4.0
 	github.com/wcharczuk/go-chart/v2 v2.1.2
 	golang.org/x/crypto v0.23.0
+	golang.org/x/image v0.18.0
 	golang.org/x/text v0.16.0
 	golang.org/x/time v0.0.0-20200416051211-89c76fbcd5d1
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
@@ -53,7 +54,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	github.com/ziutek/mymysql v1.5.4 // indirect
-	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/sys v0.20.0 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,6 +49,7 @@ func (as *Server) registerReportRoutes(router *mux.Router) {
 	router.HandleFunc("/report-templates/{id:[0-9]+}/active-version", as.ReportTemplateActiveVersion)
 	router.HandleFunc("/reports", as.ReportsCollection)
 	router.HandleFunc("/reports/{id:[0-9]+}", as.Report)
+	router.HandleFunc("/reports/{id:[0-9]+}/requirements", as.ReportRequirements)
 	router.HandleFunc("/report-slots", as.ReportSlots)
 	router.HandleFunc("/reports/{id:[0-9]+}/assets", as.ReportAssetsList)
 	router.HandleFunc("/reports/{id:[0-9]+}/assets/{slot}", as.ReportAsset)
@@ -347,8 +349,12 @@ func (as *Server) ReportSlots(w http.ResponseWriter, r *http.Request) {
 		Source   string `json:"source"`
 		Required bool   `json:"required"`
 	}
-	out := make([]slotDTO, 0, len(report.Slots))
-	for _, s := range report.Slots {
+	// Only ACTIVE slots are offered: a deprecated slot (e.g. figura_10, superseded
+	// by the native annex table) must keep working for stored templates that still
+	// declare it, but must never be presented for new ones.
+	active := report.ActiveSlots()
+	out := make([]slotDTO, 0, len(active))
+	for _, s := range active {
 		out = append(out, slotDTO{s.Key, s.Title, s.Evidence, s.Section, s.SourceName(), s.Required})
 	}
 	JSONResponse(w, out, http.StatusOK)
@@ -418,8 +424,8 @@ func (as *Server) ReportAsset(w http.ResponseWriter, r *http.Request) {
 			JSONResponse(w, models.Response{Success: false, Message: "La imagen indicada no corresponde a ninguna figura del informe."}, http.StatusBadRequest)
 			return
 		}
-		if err == report.ErrUnsupportedImageType {
-			JSONResponse(w, models.Response{Success: false, Message: "Formato de imagen no compatible. Usa " + report.SupportedImageFormats + "."}, http.StatusBadRequest)
+		if msg, bad := assetUploadErrorMessage(err); bad {
+			JSONResponse(w, models.Response{Success: false, Message: msg}, http.StatusBadRequest)
 			return
 		}
 		if err != nil {
@@ -427,6 +433,28 @@ func (as *Server) ReportAsset(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		JSONResponse(w, models.Response{Success: true, Message: "Imagen guardada."}, http.StatusOK)
+	case http.MethodDelete:
+		// CL-109: remove the image of ONE slot. Only the association is deleted; the
+		// blob stays, because other reports and frozen renders may reference it.
+		if _, err := models.GetReport(id, uid); err != nil {
+			JSONResponse(w, models.Response{Success: false, Message: msgReportNotFound}, http.StatusNotFound)
+			return
+		}
+		canon, ok := report.CanonicalSlotKey(slot)
+		if !ok {
+			JSONResponse(w, models.Response{Success: false, Message: "La imagen indicada no corresponde a ninguna figura del informe."}, http.StatusBadRequest)
+			return
+		}
+		if _, err := models.GetReportAssetBySlot(id, canon); err != nil {
+			JSONResponse(w, models.Response{Success: false, Message: "Esa figura no tiene ninguna imagen cargada."}, http.StatusNotFound)
+			return
+		}
+		if err := models.DeleteReportAsset(id, canon); err != nil {
+			log.Error(err)
+			JSONResponse(w, models.Response{Success: false, Message: "No se pudo eliminar la imagen."}, http.StatusInternalServerError)
+			return
+		}
+		JSONResponse(w, models.Response{Success: true, Message: "Imagen eliminada."}, http.StatusOK)
 	default:
 		JSONResponse(w, models.Response{Success: false, Message: msgMethodNotAllowed}, http.StatusMethodNotAllowed)
 	}
@@ -468,6 +496,68 @@ func (as *Server) ReportGenerate(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, render, http.StatusCreated)
 }
 
+// activeTemplateInspection returns the Inspection of a report's ACTIVE template
+// version, preferring the cache computed at upload time (validation_json) and
+// falling back to a live Inspect for legacy versions. Single source for both the
+// pre-flight checks and the editor: the template decides which fields exist.
+func activeTemplateInspection(templateID int64) (report.Inspection, bool) {
+	var insp report.Inspection
+	ver, err := models.GetActiveTemplateVersion(templateID)
+	if err != nil {
+		return insp, false
+	}
+	if ver.ValidationJSON != "" && json.Unmarshal([]byte(ver.ValidationJSON), &insp) == nil {
+		return insp, true
+	}
+	if docx, derr := blobStore().Get(ver.ContentSha256); derr == nil {
+		insp, _ = report.Inspect(docx)
+		return insp, true
+	}
+	return insp, false
+}
+
+// ReportRequirements tells the editor WHICH tokens and image slots the report's
+// active template actually declares, so the form is driven by the template instead
+// of hardcoding fields.
+//
+// This closes the class of bug where a field was removed from the editor by hand
+// while templates still declared its token: the field then became impossible to
+// fill and the pre-flight blocked generation with no way out.
+//
+//	GET /api/reports/{id}/requirements -> {tokens:[...], slots:[...]}
+func (as *Server) ReportRequirements(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		JSONResponse(w, models.Response{Success: false, Message: msgMethodNotAllowed}, http.StatusMethodNotAllowed)
+		return
+	}
+	uid := reportUID(r)
+	rep, err := models.GetReport(pathID(r), uid)
+	if err != nil {
+		JSONResponse(w, models.Response{Success: false, Message: msgReportNotFound}, http.StatusNotFound)
+		return
+	}
+	insp, ok := activeTemplateInspection(rep.TemplateId)
+	if !ok {
+		// No active version yet: report it explicitly instead of pretending the
+		// template declares nothing (which would hide every field).
+		JSONResponse(w, map[string]interface{}{
+			"tokens": []string{}, "slots": []string{}, "has_active_version": false,
+		}, http.StatusOK)
+		return
+	}
+	tokens := insp.Tokens
+	if tokens == nil {
+		tokens = []string{}
+	}
+	slots := insp.ImageSlots
+	if slots == nil {
+		slots = []string{}
+	}
+	JSONResponse(w, map[string]interface{}{
+		"tokens": tokens, "slots": slots, "has_active_version": true,
+	}, http.StatusOK)
+}
+
 // reportProblems returns a user-facing list of everything missing that would
 // prevent generating a complete DOCX. Empty means the report is ready. The
 // checks are driven by what the ACTIVE template actually uses: a field or image
@@ -480,17 +570,9 @@ func reportProblems(id, uid int64) []string {
 	}
 	tmplTokens := map[string]bool{}
 	tmplSlots := map[string]bool{}
-	if ver, verr := models.GetActiveTemplateVersion(rep.TemplateId); verr == nil {
-		var insp report.Inspection
-		// Reuse the inspection computed and cached at upload time (validation_json)
-		// instead of re-reading the multi-MB DOCX blob and re-parsing it on every
-		// generate. Fall back to a live Inspect only for legacy versions whose
-		// cache is empty. Same tokens/slots either way (I-2).
-		if ver.ValidationJSON != "" && json.Unmarshal([]byte(ver.ValidationJSON), &insp) == nil {
-			// cached
-		} else if docx, derr := blobStore().Get(ver.ContentSha256); derr == nil {
-			insp, _ = report.Inspect(docx)
-		}
+	// Same template-driven source the editor consumes via /requirements, so the
+	// form and the pre-flight can never disagree about which fields exist.
+	if insp, ok := activeTemplateInspection(rep.TemplateId); ok {
 		for _, tk := range insp.Tokens {
 			tmplTokens[tk] = true
 		}
@@ -504,6 +586,8 @@ func reportProblems(id, uid int64) []string {
 		{"EMPRESA", rep.CompanyName, "Falta completar el campo Empresa."},
 		{"ELABORADO_POR", rep.PreparedBy, "Falta completar el campo Elaborado por."},
 		{"PARRAFO_EJECUCION", rep.IntroExec, "Debe completar el párrafo de ejecución (Sección 3)."},
+		{"SUPLANTANDO", rep.ImpersonatedAs, "Debe indicar a quién se suplantó (Sección 3, ej. Recursos Humanos)."},
+		{"COMUNICADO", rep.Communique, "Debe indicar a qué comunicado se hace referencia (Sección 3)."},
 		{"TEXTO_PUNTO_1", rep.TextPunto1, "Debe completar el texto del Punto 1 (Sección 4)."},
 	} {
 		if tmplTokens[fc.token] && strings.TrimSpace(fc.value) == "" {
@@ -532,6 +616,9 @@ func reportProblems(id, uid int64) []string {
 	}
 	had2fa := rep.UsersWith2FA > 0
 	for _, s := range report.Slots {
+		if s.Deprecated {
+			continue // obsoleta: sigue renderizando si la plantilla la declara, pero nunca se exige
+		}
 		if s.Source != report.SourceManual || !s.Required || !tmplSlots[s.Key] {
 			continue // no es manual/obligatoria, o la plantilla activa no la usa
 		}
@@ -672,12 +759,49 @@ func readUpload(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 		return nil, false
 	}
 	defer f.Close()
-	content, err := io.ReadAll(io.LimitReader(f, maxReportUploadBytes))
+	// Read ONE byte past the limit: io.LimitReader alone would silently truncate an
+	// oversized upload, and the truncated bytes would then fail to decode with a
+	// misleading "archivo dañado" instead of "es demasiado grande".
+	content, err := io.ReadAll(io.LimitReader(f, maxReportUploadBytes+1))
 	if err != nil {
 		JSONResponse(w, models.Response{Success: false, Message: "No se pudo leer el archivo."}, http.StatusBadRequest)
 		return nil, false
 	}
+	if len(content) > maxReportUploadBytes {
+		JSONResponse(w, models.Response{Success: false, Message: fmt.Sprintf(
+			"El archivo supera el límite de %d MB. Reduce su tamaño o recorta la captura y vuelve a subirla.",
+			maxReportUploadBytes>>20)}, http.StatusBadRequest)
+		return nil, false
+	}
 	return content, true
+}
+
+// assetUploadErrorMessage turns an image-validation failure into a Spanish message
+// that says what happened, why, and what to do about it. Each case is distinct on
+// purpose: "no se pudo subir la imagen" for all of them would leave the user
+// guessing whether to convert the file, shrink it, or re-export it.
+func assetUploadErrorMessage(err error) (string, bool) {
+	switch {
+	case errors.Is(err, report.ErrRawSVG):
+		return "Los archivos SVG no se pueden subir directamente: al convertirlos en el servidor se pierde el texto de las etiquetas. " +
+			"Ábrelo en el editor de informes y súbelo desde ahí (el navegador lo convierte conservando el texto), " +
+			"o expórtalo como PNG desde tu editor de imágenes.", true
+	case errors.Is(err, report.ErrUnsupportedImageType):
+		return "El archivo no es una imagen en un formato compatible. Usa " + report.SupportedImageFormats + ". " +
+			"Si crees que sí lo es, puede que la extensión no corresponda a su contenido real; vuelve a exportarlo.", true
+	case errors.Is(err, report.ErrImageCorrupt):
+		return "La imagen está dañada o incompleta y no se pudo leer. " +
+			"Suele pasar cuando la descarga se interrumpió o el archivo se renombró a otra extensión. " +
+			"Vuelve a exportarla y súbela de nuevo.", true
+	case errors.Is(err, report.ErrImageTooManyPixels):
+		return fmt.Sprintf("La imagen tiene demasiados píxeles (el máximo son %d millones). "+
+			"Redúcela antes de subirla: una captura de pantalla normal está muy por debajo de ese límite.",
+			report.MaxImagePixels/1_000_000), true
+	case errors.Is(err, report.ErrImageTooLarge):
+		return fmt.Sprintf("El archivo supera el límite de %d MB. Reduce su tamaño o recorta la captura y vuelve a subirla.",
+			report.MaxImageBytes>>20), true
+	}
+	return "", false
 }
 
 // userIsAdmin reports whether the user has the system-modify permission.

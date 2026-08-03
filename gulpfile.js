@@ -52,6 +52,8 @@ scripts = function () {
     // Gophish app files - non-ES6
     return gulp.src([
             app_directory + 'autocomplete.js',
+            app_directory + 'trash_helpers.js',
+            app_directory + 'image_prep.js',
             app_directory + 'campaign_results.js',
             app_directory + 'campaign_groups.js',
             app_directory + 'campaign_group_results.js',
@@ -69,6 +71,7 @@ scripts = function () {
             app_directory + 'trash.js',
             app_directory + 'reportCommon.js',
             app_directory + 'report_templates.js',
+            app_directory + 'report_slots_ui.js',
             app_directory + 'reports.js'
         ])
         .pipe(rename({

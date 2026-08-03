@@ -84,3 +84,6 @@ build/
 
 # Local agent/session config (paths, command history) — not for the repo
 .claude/
+
+# Respaldos de plantillas corporativas (nunca al repo)
+*.bak

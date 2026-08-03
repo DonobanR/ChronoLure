@@ -1,6 +1,6 @@
 // Reports page: list + per-section editor (real document structure)
 var RAPI = "/api/reports"
-var state = { report: null, slots: [], assets: {} }
+var state = { report: null, slots: [], assets: {}, templateTokens: [], hasActiveVersion: true }
 var PUNTO1_PREFIX = "1. Dirección de correo electrónico:"
 
 // authHeaders, flash, errMsg, fmtDate, dateVal, assetUrl, deleteWithForce live in
@@ -9,16 +9,22 @@ var PUNTO1_PREFIX = "1. Dirección de correo electrónico:"
 // Section layout of the report. Image slots come from the catalog (by section).
 var SECTIONS = [
     { title: "Portada", fields: [
-        { k: "company_name", label: "Empresa", t: "text", req: true, reqMsg: "Falta completar el campo Empresa." },
-        { k: "report_date", label: "Fecha del informe", t: "date", req: true, reqMsg: "Falta indicar la Fecha del informe." },
-        { k: "executed_from", label: "Ejecución desde", t: "date", req: true, reqMsg: "Falta indicar la fecha de Ejecución desde." },
-        { k: "executed_to", label: "Ejecución hasta", t: "date", req: true, reqMsg: "Falta indicar la fecha de Ejecución hasta." },
-        { k: "prepared_by", label: "Elaborado por", t: "text", req: true, reqMsg: "Falta completar el campo Elaborado por." } ] },
+        { k: "company_name", token: "EMPRESA", label: "Empresa", t: "text", req: true, reqMsg: "Falta completar el campo Empresa." },
+        { k: "report_date", token: "FECHA_INFORME", label: "Fecha del informe", t: "date", req: true, reqMsg: "Falta indicar la Fecha del informe." },
+        { k: "executed_from", token: "FECHA_EJECUCION", label: "Ejecución desde", t: "date", req: true, reqMsg: "Falta indicar la fecha de Ejecución desde." },
+        { k: "executed_to", token: "FECHA_EJECUCION", label: "Ejecución hasta", t: "date", req: true, reqMsg: "Falta indicar la fecha de Ejecución hasta." },
+        { k: "prepared_by", token: "ELABORADO_POR", label: "Elaborado por", t: "text", req: true, reqMsg: "Falta completar el campo Elaborado por." } ] },
     { title: "Introducción", note: "Automático: se reemplaza el nombre de empresa y las fechas de ejecución en todo el texto." },
     { title: "Sección 3 – Ejecución de la campaña", fields: [
-        { k: "intro_exec", label: "Párrafo introductorio", t: "textarea", req: true, reqMsg: "Debe completar el párrafo de ejecución (Sección 3)." } ] },
+        // intro_exec is back: whether it is shown is decided by the ACTIVE TEMPLATE
+        // (it appears only if the template declares {{PARRAFO_EJECUCION}}). Removing
+        // it by hand made it impossible to fill while 22 active templates still
+        // required it — a dead end the pre-flight could not resolve.
+        { k: "intro_exec", label: "Párrafo introductorio", t: "textarea", token: "PARRAFO_EJECUCION", req: true, reqMsg: "Debe completar el párrafo de ejecución (Sección 3)." },
+        { k: "impersonated_as", label: "¿A quién está suplantando? (ej. Recursos Humanos)", t: "text", token: "SUPLANTANDO", req: true, reqMsg: "Debe indicar a quién se suplantó (Sección 3, ej. Recursos Humanos)." },
+        { k: "communique", label: "¿A qué comunicado hace referencia?", t: "text", token: "COMUNICADO", req: true, reqMsg: "Debe indicar a qué comunicado se hace referencia (Sección 3)." } ] },
     { title: "Sección 4 – Puntos clave", fields: [
-        { k: "text_punto_1", label: "Punto 1", t: "textarea", prefix: PUNTO1_PREFIX, req: true, reqMsg: "Debe completar el texto del Punto 1 (Sección 4)." } ] },
+        { k: "text_punto_1", token: "TEXTO_PUNTO_1", label: "Punto 1", t: "textarea", prefix: PUNTO1_PREFIX, req: true, reqMsg: "Debe completar el texto del Punto 1 (Sección 4)." } ] },
     { title: "Sección 5 – Resultados", note: "Esta sección se genera automáticamente utilizando las métricas reales de la campaña (no se sube ninguna imagen)." },
     { title: "Sección 6 – Evidencia de credenciales válidas", fields: [
         { k: "had2fa", label: "¿Se encontraron cuentas con 2FA?", t: "checkbox" } ] },
@@ -139,16 +145,31 @@ function openEditor(rid) {
     $.when(
         $.ajax({ url: RAPI + '/' + rid, headers: authHeaders() }),
         getSlots(),
-        $.ajax({ url: RAPI + '/' + rid + '/assets', headers: authHeaders() })
-    ).done(function (rep, slots, assets) {
+        $.ajax({ url: RAPI + '/' + rid + '/assets', headers: authHeaders() }),
+        // Which fields exist is decided by the ACTIVE TEMPLATE, not by this file.
+        $.ajax({ url: RAPI + '/' + rid + '/requirements', headers: authHeaders() })
+    ).done(function (rep, slots, assets, reqs) {
         // rep/assets come from $.ajax ([data,status,xhr]); getSlots resolves with
         // the slots array directly (cached or freshly fetched).
         state.report = rep[0]; state.slots = slots
         state.assets = {}; (assets[0] || []).forEach(function (a) { state.assets[a.slot] = a.mime })
+        var rq = (reqs && reqs[0]) || {}
+        state.templateTokens = rq.tokens || []
+        state.hasActiveVersion = rq.has_active_version !== false
         renderEditor()
         $("#listView").hide(); $("#editorView").show()
         window.scrollTo(0, 0)
     }).fail(function () { flash('Error abriendo el informe', 'danger') })
+}
+
+// fieldAppliesToTemplate decides whether a form field belongs on screen: only if
+// the ACTIVE template declares its token. A field with no declared token is always
+// shown (it is not template-driven, e.g. the 2FA checkbox). When the template has no
+// active version we show everything rather than an empty form.
+function fieldAppliesToTemplate(f) {
+    if (!f || !f.token) return true
+    if (state.hasActiveVersion === false) return true
+    return (state.templateTokens || []).indexOf(f.token) !== -1
 }
 
 function closeEditor() { $("#editorView").hide(); $("#listView").show(); state.report = null; loadReports() }
@@ -165,6 +186,7 @@ function renderEditor() {
         if (sec.note) { html += '<p class="text-muted"><i class="fa fa-magic"></i> ' + escapeHtml(sec.note) + '</p>' }
         // editable fields
         ;(sec.fields || []).forEach(function (f) {
+            if (!fieldAppliesToTemplate(f)) return // la plantilla activa no usa su token
             var id = 'f-' + f.k
             var star = f.req ? ' <span class="text-danger" title="Obligatorio">*</span>' : ''
             html += '<div class="form-group" id="fg-' + f.k + '" style="display:block;margin-bottom:10px">'
@@ -203,23 +225,26 @@ function renderEditor() {
     apply2faVisibility()
 }
 
+// renderSlot delegates to ReportSlotsUI so the SAME markup is produced on the
+// initial render and on every partial refresh — the previous split (full render
+// built the badge, upload refreshed only the thumbnail) is what made an uploaded
+// image keep reading "obligatoria — falta".
 function renderSlot(s) {
-    if (s.source === 'auto') {
-        return '<div class="col-sm-4" style="margin-bottom:12px"><div class="thumbnail" style="padding:8px">' +
-            '<strong>' + escapeHtml(s.title) + '</strong>' +
-            '<p class="text-muted" style="margin:6px 0"><i class="fa fa-magic"></i> Automático (se genera del gráfico)</p></div></div>'
-    }
-    var loaded = !!state.assets[s.key]
-    var thumb = loaded
-        ? '<img src="' + assetUrl(state.report.id, s.key) + '" style="max-height:90px;max-width:100%;display:block;margin:6px auto">'
-        : '<div style="height:90px;background:#f5f5f5;border:1px dashed #ccc;text-align:center;line-height:90px;color:#aaa">sin imagen</div>'
-    return '<div class="col-sm-4" id="slot-col-' + s.key + '" style="margin-bottom:12px"><div class="thumbnail" style="padding:8px">' +
-        '<strong>' + escapeHtml(s.title) + '</strong>' + (s.required ? ' <span class="text-danger" title="Obligatoria">*</span>' : '') + ' ' +
-        (loaded ? '<span class="label label-success">cargada</span>' : (s.required ? '<span class="label label-danger">obligatoria — falta</span>' : '<span class="label label-default">opcional</span>')) +
-        '<p class="text-muted" style="font-size:.85em;margin:4px 0">' + escapeHtml(s.evidence) + '</p>' +
-        '<div id="thumb-' + s.key + '">' + thumb + '</div>' +
-        '<input type="file" accept="image/*" style="margin-top:6px" onchange="uploadAsset(\'' + s.key + '\', this)">' +
-        '</div></div>'
+    return ReportSlotsUI.slotCardHtml(s, {
+        loaded: !!state.assets[s.key],
+        assetUrl: assetUrl(state.report.id, s.key)
+    })
+}
+
+// refreshSlotCard re-renders ONE slot card whole (badge + thumbnail + buttons), so
+// its parts can never drift apart.
+function refreshSlotCard(key) {
+    var slot = (state.slots || []).filter(function (s) { return s.key === key })[0]
+    if (!slot) return
+    var $col = $('#slot-col-' + key)
+    if (!$col.length) return
+    $col.replaceWith(renderSlot(slot))
+    $('[data-toggle="tooltip"]').tooltip()
 }
 
 // has2faChecked reads the live checkbox (defaults to the saved value if absent).
@@ -239,30 +264,70 @@ function apply2faVisibility() {
 }
 
 function renderStatus() {
-    var show8 = has2faChecked()
-    var manual = state.slots.filter(function (s) {
-        // figura_8 solo es obligatoria cuando hay 2FA (visible).
-        return s.source !== 'auto' && s.required && !(s.key === 'figura_8' && !show8)
-    })
-    var loaded = manual.filter(function (s) { return !!state.assets[s.key] })
-    var missing = manual.filter(function (s) { return !state.assets[s.key] }).map(function (s) { return s.key })
-    var ok = missing.length === 0
-    $("#statusBar").html('<div class="alert alert-' + (ok ? 'success' : 'warning') + '">' +
-        '<strong>Imágenes:</strong> ' + loaded.length + ' / ' + manual.length + ' cargadas. ' +
-        (ok ? 'Todas las obligatorias están.' : 'Faltan: ' + escapeHtml(missing.join(', '))) + '</div>')
+    var st = ReportSlotsUI.statusSummary(state.slots, state.assets, { had2fa: has2faChecked() })
+    $("#statusBar").html('<div class="alert alert-' + (st.ok ? 'success' : 'warning') + '">' +
+        '<strong>Imágenes:</strong> ' + st.loaded + ' / ' + st.total + ' cargadas. ' +
+        (st.ok ? 'Todas las obligatorias están.'
+               : 'Faltan: ' + escapeHtml(st.missing.join(', '))) + '</div>')
 }
 
+// uploadAsset sends the evidence image. SVG never leaves the browser as SVG:
+// ImagePrep rasterizes it with the browser's own engine (which draws text; the
+// server-side Go rasterizers do not) and what travels is the resulting PNG. The
+// server rejects raw SVG regardless — this is the convenience half, not the
+// security half.
 function uploadAsset(slot, input) {
     if (!input.files || !input.files[0]) return
-    var fd = new FormData(); fd.append('file', input.files[0])
-    $.ajax({ url: RAPI + '/' + state.report.id + '/assets/' + slot, method: 'POST', headers: authHeaders(), data: fd, processData: false, contentType: false })
-        .done(function () {
-            state.assets[slot] = 'image'
-            $("#thumb-" + slot).html('<img src="' + assetUrl(state.report.id, slot) + '" style="max-height:90px;max-width:100%;display:block;margin:6px auto">')
-            renderStatus()
-            flash('Imagen "' + slot + '" cargada', 'success')
+    var file = input.files[0]
+    ImagePrep.prepareUpload(file)
+        .then(function (prepared) {
+            var fd = new FormData()
+            fd.append('file', prepared.blob, prepared.name)
+            return $.ajax({ url: RAPI + '/' + state.report.id + '/assets/' + slot, method: 'POST', headers: authHeaders(), data: fd, processData: false, contentType: false })
+                .done(function () {
+                    state.assets[slot] = 'image'
+                    refreshSlotCard(slot) // badge + miniatura + botón, juntos
+                    renderStatus()
+                    // The warning is shown as a lasting notice, not a fleeting toast:
+                    // the preview beside it IS the PNG that was uploaded, so this is
+                    // the moment to catch a substituted font.
+                    if (prepared.converted) flash(prepared.warning, 'warning')
+                    else flash('Imagen cargada.', 'success')
+                })
+                .fail(function (xhr) { flash((xhr.responseJSON && xhr.responseJSON.message) || 'Error subiendo imagen', 'danger') })
         })
-        .fail(function (xhr) { flash((xhr.responseJSON && xhr.responseJSON.message) || 'Error subiendo imagen', 'danger') })
+        .catch(function (e) { flash((e && e.message) || 'No se pudo preparar la imagen.', 'danger') })
+        .then(function () { input.value = '' }) // allow re-selecting the same file
+}
+
+// deleteAsset (CL-109) removes the image of one slot. Required slots ask for a
+// light confirmation first — the slot goes back to "falta" and would block
+// generation, so it must not be a one-click dead end.
+function deleteAsset(slot) {
+    var s = (state.slots || []).filter(function (x) { return x.key === slot })[0]
+    var doDelete = function () {
+        $.ajax({ url: RAPI + '/' + state.report.id + '/assets/' + slot, method: 'DELETE', headers: authHeaders() })
+            .done(function () {
+                delete state.assets[slot]
+                refreshSlotCard(slot)
+                renderStatus()
+                flash('Imagen eliminada. Vuelve a subirla cuando quieras.', 'success')
+            })
+            .fail(function (xhr) { flash((xhr.responseJSON && xhr.responseJSON.message) || 'No se pudo eliminar la imagen', 'danger') })
+    }
+    if (s && s.required) {
+        Swal.fire({
+            title: '¿Eliminar la imagen?',
+            html: 'Vas a quitar la imagen de <strong>' + escapeHtml(s.title) + '</strong>. ' +
+                  'Es obligatoria, así que el informe no podrá generarse hasta que subas otra.',
+            type: 'warning', animation: false,
+            showCancelButton: true, focusCancel: true, reverseButtons: true,
+            confirmButtonText: 'Eliminar imagen', confirmButtonColor: '#c9302c',
+            cancelButtonText: 'Cancelar'
+        }).then(function (r) { if (r.value) doDelete() })
+        return
+    }
+    doDelete()
 }
 
 function collectFields() {
@@ -270,7 +335,12 @@ function collectFields() {
     var data = {
         subject_kind: r.subject_kind, subject_id: r.subject_id, template_id: r.template_id,
         company_name: $("#f-company_name").val(), prepared_by: $("#f-prepared_by").val(),
-        intro_exec: $("#f-intro_exec").val(),
+        // If the active template declares {{PARRAFO_EJECUCION}} the field is on
+        // screen and we send what the user typed; if it does not, the field is not
+        // rendered and we preserve whatever was stored (never silently wipe it).
+        intro_exec: ($("#f-intro_exec").length ? $("#f-intro_exec").val() : (r.intro_exec || '')),
+        impersonated_as: $("#f-impersonated_as").val(),
+        communique: $("#f-communique").val(),
         // Punto 1: solo el contenido. El encabezado fijo vive en la plantilla
         // (run propio, sin negrita) y el "1." es numeración automática del Word.
         text_punto_1: $("#f-text_punto_1").val().trim(),
@@ -309,6 +379,7 @@ function validateReport() {
     SECTIONS.forEach(function (sec) {
         (sec.fields || []).forEach(function (f) {
             if (!f.req) return
+            if (!fieldAppliesToTemplate(f)) return // no está en pantalla: no se exige
             var v = $('#f-' + f.k).val()
             if (!v || !v.trim()) {
                 markFieldError(f.k, 'Este campo es obligatorio.')
@@ -316,15 +387,13 @@ function validateReport() {
             }
         })
     })
-    var show8 = has2faChecked()
-    state.slots.filter(function (s) {
-        return s.source !== 'auto' && s.required && !(s.key === 'figura_8' && !show8)
-    }).forEach(function (s) {
-        if (!state.assets[s.key]) {
+    // Same source of truth as the badges and the summary: only genuinely absent
+    // required slots are reported, and only they get the red outline.
+    ReportSlotsUI.missingRequiredSlots(state.slots, state.assets, { had2fa: has2faChecked() })
+        .forEach(function (s) {
             problems.push('Falta cargar la imagen: ' + s.title + '.')
             $('#slot-col-' + s.key + ' .thumbnail').addClass('slot-missing').css('border', '2px solid #d9534f')
-        }
-    })
+        })
     return problems
 }
 

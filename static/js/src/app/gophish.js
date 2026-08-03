@@ -100,6 +100,25 @@ var api = {
         results: function (id) {
             return query("/campaigns/" + id + "/results", "GET", {}, true)
         },
+        // resultDelete() - Soft-deletes a recipient (moves to Trash, reversible).
+        // DELETE /campaigns/:id/results/:rid
+        resultDelete: function (id, rid, reason, scope) {
+            return query("/campaigns/" + id + "/results/" + encodeURIComponent(rid), "DELETE", { reason: reason || "", scope: scope || "campaign" }, false)
+        },
+        // resultsBulkDelete() - Soft-deletes several recipients in one batch.
+        resultsBulkDelete: function (id, resultIds, reason, scope) {
+            return query("/campaigns/" + id + "/results/bulk-delete", "POST", { result_ids: resultIds, reason: reason || "", scope: scope || "campaign" }, false)
+        },
+        // resultsDeletePreview() - GET what a deletion would touch, without deleting.
+        resultsDeletePreview: function (id, rids, scope) {
+            return query("/campaigns/" + id + "/results/delete-preview?rids=" +
+                encodeURIComponent((rids || []).join(",")) + "&scope=" + encodeURIComponent(scope || "campaign"),
+                "GET", null, false)
+        },
+        // resultsTrashed() - Lists the soft-deleted recipients of a campaign.
+        resultsTrashed: function (id) {
+            return query("/campaigns/" + id + "/results/trashed", "GET", {}, true)
+        },
         // complete() - Completes a campaign at POST /campaigns/:id/complete
         complete: function (id) {
             return query("/campaigns/" + id + "/complete", "GET", {}, true)
@@ -150,6 +169,10 @@ var api = {
         stats: function (id) {
             return query("/campaign-groups/" + id + "/stats", "GET", {}, false)
         },
+        // resultsTrashed() - GET /campaign-groups/:id/results/trashed (CL-102R-b §5)
+        resultsTrashed: function (id) {
+            return query("/campaign-groups/" + id + "/results/trashed", "GET", {}, true)
+        },
         // archive() - Archives or unarchives a campaign group at POST /campaign-groups/:id/archive
         archive: function (id, archived) {
             return query("/campaign-groups/" + id + "/archive", "POST", {archived: archived}, false)
@@ -169,6 +192,48 @@ var api = {
         // purge() - DELETE /api/trash/{type}/{id}/purge
         purge: function (itemType, id, confirmData) {
             return query('/trash/' + encodeURIComponent(itemType) + '/' + id + '/purge', 'DELETE', confirmData || {}, false)
+        }
+    },
+    // recipientTrash — CL-102R recipient soft-delete lifecycle endpoints
+    recipientTrash: {
+        // list() - GET /api/trash?type=recipient with optional filters
+        list: function (f) {
+            f = f || {}
+            var qs = ['type=recipient']
+            if (f.campaign) qs.push('campaign_id=' + encodeURIComponent(f.campaign))
+            if (f.group) qs.push('group_id=' + encodeURIComponent(f.group))
+            if (f.q) qs.push('q=' + encodeURIComponent(f.q))
+            return query('/trash?' + qs.join('&'), 'GET', null, false)
+        },
+        // batches() - GET /api/trash?type=recipient&group_by=batch (rollup for "All")
+        batches: function (f) {
+            f = f || {}
+            var qs = ['type=recipient', 'group_by=batch']
+            if (f.campaign) qs.push('campaign_id=' + encodeURIComponent(f.campaign))
+            if (f.group) qs.push('group_id=' + encodeURIComponent(f.group))
+            if (f.q) qs.push('q=' + encodeURIComponent(f.q))
+            return query('/trash?' + qs.join('&'), 'GET', null, false)
+        },
+        // counts() - GET /api/trash/counts (unfiltered per-type totals for badges)
+        counts: function () {
+            return query('/trash/counts', 'GET', null, false)
+        },
+        // batchDetail() - GET /api/trash/recipient/batch/{batch_id}
+        batchDetail: function (batchID) {
+            return query('/trash/recipient/batch/' + encodeURIComponent(batchID), 'GET', null, false)
+        },
+        // restoreBatch() - the toast "Deshacer": restores a whole delete batch
+        restoreBatch: function (batchID) {
+            return query('/trash/recipient/restore-batch', 'POST', { batch_id: batchID }, false)
+        },
+        restore: function (id) {
+            return query('/trash/recipient/' + id + '/restore', 'POST', {}, false)
+        },
+        purge: function (id, confirmEmail) {
+            return query('/trash/recipient/' + id + '/purge', 'POST', { confirm: confirmEmail }, false)
+        },
+        purgeBatch: function (batchID) {
+            return query('/trash/recipient/purge-batch', 'POST', { batch_id: batchID, confirm: 'ELIMINAR' }, false)
         }
     },
     // groups contains the endpoints for /groups

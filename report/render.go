@@ -36,6 +36,11 @@ type RenderInput struct {
 	// caption, image and spacing all disappear); when true, only the marker
 	// paragraphs are removed and the content is kept.
 	Conditions map[string]bool
+	// AnnexTableXML, if non-empty, replaces the paragraph carrying the
+	// {{TABLA_ANEXO}} marker with this native <w:tbl> element (the S9 annex table,
+	// CL-105). Empty leaves the marker paragraph in place (removed as an unknown
+	// token by replaceTokens would not happen; see replaceAnnexTable).
+	AnnexTableXML string
 }
 
 // Render performs a fixed-template mail-merge: it replaces text tokens and swaps
@@ -95,6 +100,9 @@ func Render(in RenderInput) ([]byte, string, error) {
 				s = processConditionals(s, in.Conditions)
 			}
 			s = replaceTokens(s, in.Vars)
+			if in.AnnexTableXML != "" {
+				s = replaceAnnexTable(s, in.AnnexTableXML)
+			}
 			parts[i].data = []byte(s)
 			if len(in.Images) > 0 {
 				rels := byName[relsFor(parts[i].name)]
@@ -193,6 +201,33 @@ var (
 // run texts, substitutes, and writes the result back into the first run
 // (preserving that run's formatting) while emptying the others. Drawings and
 // non-text nodes are never touched.
+// replaceAnnexTable replaces the whole paragraph carrying the {{TABLA_ANEXO}}
+// marker with the native <w:tbl> element. A table cannot live inside a paragraph,
+// so the entire <w:p>…</w:p> is swapped out. Paragraphs never nest in OOXML, so
+// the first </w:p> after the marker closes its paragraph. The marker text may be
+// run-fragmented, but the token itself is emitted as a single run by the
+// tokenizer, so a literal search suffices; if not found, the input is unchanged.
+func replaceAnnexTable(xmlStr, tableXML string) string {
+	marker := "{{" + AnnexTableToken + "}}"
+	idx := strings.Index(xmlStr, marker)
+	if idx < 0 {
+		return xmlStr
+	}
+	// Start of the containing paragraph: the nearest "<w:p>" or "<w:p " before the
+	// marker (never "<w:pPr>", which starts with "<w:pP").
+	start := strings.LastIndex(xmlStr[:idx], "<w:p>")
+	if s2 := strings.LastIndex(xmlStr[:idx], "<w:p "); s2 > start {
+		start = s2
+	}
+	endRel := strings.Index(xmlStr[idx:], "</w:p>")
+	if start < 0 || endRel < 0 {
+		// No paragraph wrapper found; drop the marker so it never leaks to output.
+		return strings.Replace(xmlStr, marker, tableXML, 1)
+	}
+	end := idx + endRel + len("</w:p>")
+	return xmlStr[:start] + tableXML + xmlStr[end:]
+}
+
 func replaceTokens(xmlStr string, vars map[string]string) string {
 	xmlStr = tokenReplaceRe.ReplaceAllStringFunc(xmlStr, func(m string) string {
 		name := tokenReplaceRe.FindStringSubmatch(m)[1]
@@ -226,8 +261,8 @@ func mergeAndReplaceParagraph(p string, vars map[string]string) string {
 	// Build the concatenated text S of all <w:t> inner contents, remembering
 	// each segment's base offset in S so any S position maps back to a run.
 	type segment struct {
-		open, inner, close   string
-		fullStart, fullEnd   int
+		open, inner, close string
+		fullStart, fullEnd int
 	}
 	segs := make([]segment, len(locs))
 	base := make([]int, len(locs))
@@ -331,13 +366,19 @@ func slotMediaPaths(xmlStr string, rels []byte, partName string, wanted map[stri
 	dir := partName[:strings.LastIndex(partName, "/")+1]
 	for _, loc := range docPrRe.FindAllStringIndex(xmlStr, -1) {
 		el := xmlStr[loc[0]:loc[1]]
-		// The drawing label identifies a slot by descr (preferred) or name.
+		// The drawing label identifies a slot by descr (preferred) or name. Fold
+		// each to the canonical catalog key so authoring variations (case/spaces
+		// in the Alt-Text) still resolve to the uploaded slot (CL-104).
 		var slots []string
 		if m := descrRe.FindStringSubmatch(el); m != nil {
-			slots = append(slots, m[1])
+			if canon, ok := CanonicalSlotKey(m[1]); ok {
+				slots = append(slots, canon)
+			}
 		}
 		if m := nameAtRe.FindStringSubmatch(el); m != nil {
-			slots = append(slots, m[1])
+			if canon, ok := CanonicalSlotKey(m[1]); ok {
+				slots = append(slots, canon)
+			}
 		}
 		matched := false
 		for _, s := range slots {

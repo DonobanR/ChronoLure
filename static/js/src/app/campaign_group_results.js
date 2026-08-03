@@ -25,6 +25,7 @@ var groupId = window.location.pathname.split('/').pop()
 $(document).ready(function () {
     loadCampaignGroup()
     loadCampaigns()
+    loadGroupTrashedRecipients()
 
     // Picker: search input for edit modal
     $('#editCampaignSearch').on('input', function () {
@@ -48,6 +49,73 @@ $(document).ready(function () {
         $('#edit-modal-flashes').empty()
     })
 })
+
+// ── CL-102R-b (§5): trashed recipients of the whole group ─────────────────────
+//
+// Same contract as the campaign page: a persistent indicator while recipients are
+// in the Trash (metrics must never change in silence), restore inline, and NO
+// permanent delete here — that lives in /trash behind a written confirmation.
+var groupTrashedRecipients = []
+
+function loadGroupTrashedRecipients() {
+    api.campaign_groups.resultsTrashed(groupId)
+        .success(function (data) {
+            groupTrashedRecipients = (data && data.items) || []
+            renderGroupTrashedBanner()
+        })
+        .error(function () { /* informational only; never block the page */ })
+}
+
+function renderGroupTrashedBanner() {
+    var n = groupTrashedRecipients.length
+    var $b = $("#groupRecipientTrashBanner")
+    if (!n) { $b.hide().empty(); return }
+    var rows = groupTrashedRecipients.map(function (it) {
+        var blocked = TrashHelpers.restoreBlockedReason(it)
+        var where = it.campaign_count > 1
+            ? TrashHelpers.pluralizeCampaigns(it.campaign_count) +
+              (it.group_name ? ' del grupo «' + escapeHtml(it.group_name) + '»' : '')
+            : escapeHtml(it.campaign_name || '—')
+        var badge = blocked
+            ? ' <span class="label label-warning"><i class="fa fa-exclamation-triangle"></i> Campaña en papelera</span>'
+            : ''
+        var btn = blocked
+            ? '<button class="btn btn-xs btn-default" disabled data-toggle="tooltip" title="' + escapeHtml(blocked) + '" style="min-height:44px;min-width:44px">Restaurar</button>'
+            : '<button class="btn btn-xs btn-success" style="min-height:44px;min-width:44px" onclick="restoreGroupRecipient(' + it.id + ')">Restaurar</button>'
+        return '<tr><td>' + escapeHtml(it.email) + badge + '</td><td class="text-muted">' + where +
+            '</td><td class="text-muted">' + escapeHtml(it.reason || '—') + '</td>' +
+            '<td class="text-right">' + btn + '</td></tr>'
+    }).join('')
+    $b.html(
+        '<div class="alert alert-warning" role="status" aria-live="polite">' +
+        '<i class="fa fa-trash-o"></i> <strong>' + TrashHelpers.pluralizeRecipients(n) +
+        ' eliminados</strong> no se están contando en estas métricas del grupo. ' +
+        '<button class="btn btn-xs btn-default" style="min-height:44px" onclick="$(\'#groupRecipientTrashPanel\').toggle()">Ver / ocultar</button> ' +
+        '<a class="btn btn-xs btn-link" style="min-height:44px" href="/trash?type=recipient&group=' + groupId + '">Ver en papelera</a>' +
+        '<div id="groupRecipientTrashPanel" style="display:none;margin-top:10px">' +
+        '<table class="table table-condensed"><thead><tr><th>Correo</th><th>Campaña</th><th>Motivo</th>' +
+        '<th class="text-right">Acción</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<span class="text-muted" style="font-size:.9em">Para eliminarlos definitivamente, ve a la Papelera.</span>' +
+        '</div></div>'
+    ).show()
+    $('[data-toggle="tooltip"]').tooltip()
+}
+
+function restoreGroupRecipient(resultID) {
+    api.recipientTrash.restore(resultID)
+        .success(function () {
+            Swal.fire({ toast: true, position: "top-end", type: "success",
+                title: "Se restauró el destinatario.", showConfirmButton: false, timer: 4000 })
+            // Single refresh path: banner + stats + campaign list all re-read.
+            loadGroupTrashedRecipients()
+            loadStats()
+            loadCampaigns()
+        })
+        .error(function (xhr) {
+            var msg = (xhr && xhr.responseJSON && xhr.responseJSON.message) || "No se pudo restaurar el destinatario"
+            Swal.fire({ type: "error", title: "Error", text: msg })
+        })
+}
 
 // Load campaign group details
 function loadCampaignGroup() {

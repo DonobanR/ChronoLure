@@ -20,6 +20,9 @@ type RenderSnapshot struct {
 	TotalRecipients int64             `json:"total_recipients"`
 	UsersWith2FA    int64             `json:"users_with_2fa"`
 	Vars            map[string]string `json:"vars"`
+	// AnnexTableXML freezes the S9 annex table (CL-105) so the audit rebuild
+	// reproduces the DOCX byte-for-byte. Empty for legacy renders (image annex).
+	AnnexTableXML string `json:"annex_table_xml,omitempty"`
 }
 
 // Generate is the production entry point: it resolves the report's data source
@@ -61,8 +64,16 @@ func generate(store BlobStore, report models.Report, version models.ReportTempla
 	if err != nil {
 		return models.ReportRender{}, nil, err
 	}
-	// 4) Render the DOCX and obtain its fingerprint, then store it as a blob.
-	docx, fingerprint, err := buildDocument(templateBytes, vars, images, funnel, report.UsersWith2FA > 0)
+	// 4) Render the DOCX and obtain its fingerprint, then store it as a blob. The
+	//    S9 annex table (CL-105) is built from the SAME per-recipient rows as the
+	//    Excel annex (already excludes internal validation recipients, CL-102).
+	annexTableXML := ""
+	if recips, rerr := src.Recipients(); rerr != nil {
+		log.Errorf("report %d: could not load recipients for annex table: %v", report.Id, rerr)
+	} else {
+		annexTableXML = BuildAnnexTableXML(recips)
+	}
+	docx, fingerprint, err := buildDocument(templateBytes, vars, images, funnel, report.UsersWith2FA > 0, annexTableXML)
 	if err != nil {
 		return models.ReportRender{}, nil, err
 	}
@@ -76,7 +87,7 @@ func generate(store BlobStore, report models.Report, version models.ReportTempla
 	render, err := createRender(report, version, renderOutputs{
 		funnel: funnel, total: total, vars: vars,
 		outSha: outSha, xlsxSha: xlsxSha, fingerprint: fingerprint, outputSize: int64(len(docx)),
-		generatedBy: generatedBy, frozen: frozen,
+		generatedBy: generatedBy, frozen: frozen, annexTableXML: annexTableXML,
 	})
 	if err != nil {
 		return models.ReportRender{}, nil, err
@@ -108,6 +119,8 @@ func buildReportVars(src ReportSource, report models.Report) (FunnelMetrics, int
 		ExecutedFrom:    pick(report.ExecutedFrom, start),
 		ExecutedTo:      pick(report.ExecutedTo, end),
 		IntroExec:       report.IntroExec,
+		ImpersonatedAs:  report.ImpersonatedAs,
+		Communique:      report.Communique,
 		TextPunto1:      report.TextPunto1,
 		Had2FA:          report.UsersWith2FA > 0,
 		TotalRecipients: total,
@@ -155,7 +168,7 @@ func buildImages(store BlobStore, reportID int64, funnel FunnelMetrics, template
 // buildDocument renders the DOCX and returns it with its content fingerprint
 // (computed by Render from its in-memory parts). The native results chart is
 // driven by the SAME funnel buckets as the results table.
-func buildDocument(templateBytes []byte, vars map[string]string, images map[string][]byte, funnel FunnelMetrics, had2FA bool) ([]byte, string, error) {
+func buildDocument(templateBytes []byte, vars map[string]string, images map[string][]byte, funnel FunnelMetrics, had2FA bool, annexTableXML string) ([]byte, string, error) {
 	return Render(RenderInput{
 		Template: templateBytes,
 		Vars:     vars,
@@ -164,7 +177,8 @@ func buildDocument(templateBytes []byte, vars map[string]string, images map[stri
 			float64(funnel.Ignorado), float64(funnel.Abierto),
 			float64(funnel.Clic), float64(funnel.Datos),
 		},
-		Conditions: map[string]bool{"HAD_2FA": had2FA},
+		Conditions:    map[string]bool{"HAD_2FA": had2FA},
+		AnnexTableXML: annexTableXML,
 	})
 }
 
@@ -198,15 +212,16 @@ func buildExcelAnnex(store BlobStore, src ReportSource, reportID int64) string {
 // renderOutputs bundles the inputs createRender needs (keeps its signature
 // readable).
 type renderOutputs struct {
-	funnel      FunnelMetrics
-	total       int64
-	vars        map[string]string
-	outSha      string
-	xlsxSha     string
-	fingerprint string
-	outputSize  int64
-	generatedBy int64
-	frozen      []models.ReportRenderAsset
+	funnel        FunnelMetrics
+	total         int64
+	vars          map[string]string
+	outSha        string
+	xlsxSha       string
+	fingerprint   string
+	outputSize    int64
+	generatedBy   int64
+	frozen        []models.ReportRenderAsset
+	annexTableXML string
 }
 
 // createRender freezes the immutable render row (with its metrics snapshot and
@@ -217,6 +232,7 @@ func createRender(report models.Report, version models.ReportTemplateVersion, o 
 		TotalRecipients: o.total,
 		UsersWith2FA:    report.UsersWith2FA,
 		Vars:            o.vars,
+		AnnexTableXML:   o.annexTableXML,
 	}
 	metricsJSON, err := json.Marshal(snapshot)
 	if err != nil {
@@ -326,7 +342,8 @@ func rebuildAndAudit(store BlobStore, render models.ReportRender, assets []model
 			float64(snapshot.Funnel.Ignorado), float64(snapshot.Funnel.Abierto),
 			float64(snapshot.Funnel.Clic), float64(snapshot.Funnel.Datos),
 		},
-		Conditions: map[string]bool{"HAD_2FA": snapshot.UsersWith2FA > 0},
+		Conditions:    map[string]bool{"HAD_2FA": snapshot.UsersWith2FA > 0},
+		AnnexTableXML: snapshot.AnnexTableXML,
 	})
 	if err != nil {
 		return nil, AuditResult{}, err

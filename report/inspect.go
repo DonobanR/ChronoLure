@@ -28,6 +28,8 @@ var Vocabulary = map[string]bool{
 	"RANGO_FECHAS":      true,
 	"N_USUARIOS":        true,
 	"PARRAFO_EJECUCION": true,
+	"SUPLANTANDO":       true,
+	"COMUNICADO":        true,
 	"TEXTO_PUNTO_1":     true,
 	"R_IGNORADO":        true,
 	"R_ABIERTO":         true,
@@ -72,8 +74,10 @@ var (
 	tagRe    = regexp.MustCompile(`<[^>]+>`)
 	tokenRe  = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_]+)\s*\}\}`)
 	docPrRe  = regexp.MustCompile(`<(?:wp:docPr|pic:cNvPr)\b[^>]*>`)
-	descrRe  = regexp.MustCompile(`\bdescr="([A-Za-z0-9_]+)"`)
-	nameAtRe = regexp.MustCompile(`\bname="([A-Za-z0-9_]+)"`)
+	// Capture the full attribute value (not just [A-Za-z0-9_]) so Alt-Text with
+	// spaces ("Figura 2") is seen; CanonicalSlotKey then folds case/separators.
+	descrRe  = regexp.MustCompile(`\bdescr="([^"]*)"`)
+	nameAtRe = regexp.MustCompile(`\bname="([^"]*)"`)
 )
 
 // Inspect analyzes the DOCX bytes and reports the tokens and image slots it
@@ -130,10 +134,19 @@ func Inspect(docx []byte) (Inspection, error) {
 	slotCounts := make(map[string]int)
 	for _, el := range docPrRe.FindAllString(raw, -1) {
 		key := ""
-		if m := descrRe.FindStringSubmatch(el); m != nil && IsSlot(m[1]) {
-			key = m[1]
-		} else if m := nameAtRe.FindStringSubmatch(el); m != nil && IsSlot(m[1]) {
-			key = m[1]
+		// Prefer descr (Alt-Text), fall back to name; fold to the canonical
+		// catalog key so authoring variations (case/spaces) still match (CL-104).
+		if m := descrRe.FindStringSubmatch(el); m != nil {
+			if canon, ok := CanonicalSlotKey(m[1]); ok {
+				key = canon
+			}
+		}
+		if key == "" {
+			if m := nameAtRe.FindStringSubmatch(el); m != nil {
+				if canon, ok := CanonicalSlotKey(m[1]); ok {
+					key = canon
+				}
+			}
 		}
 		if key != "" {
 			slotCounts[key]++
@@ -155,9 +168,10 @@ func Inspect(docx []byte) (Inspection, error) {
 	tokenSet := make(map[string]bool, len(tokens))
 	for _, t := range tokens {
 		tokenSet[t] = true
-		// Conditional block markers ({{IF_X}}/{{ENDIF_X}}) are structural, not
-		// fillable tokens; they are valid and handled by the renderer.
-		if strings.HasPrefix(t, "IF_") || strings.HasPrefix(t, "ENDIF_") {
+		// Conditional block markers ({{IF_X}}/{{ENDIF_X}}) and the annex-table
+		// marker ({{TABLA_ANEXO}}) are structural, not fillable tokens; they are
+		// valid and handled by the renderer.
+		if strings.HasPrefix(t, "IF_") || strings.HasPrefix(t, "ENDIF_") || t == AnnexTableToken {
 			continue
 		}
 		if !Vocabulary[t] {

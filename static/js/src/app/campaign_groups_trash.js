@@ -204,11 +204,20 @@ window.showPurgeModal = function (idx) {
     setTimeout(function () { $("#purgeConfirmText").focus(); }, 500);
 };
 
-// Enable purge button only when name matches exactly
+// Normalize whitespace so names with trailing/double spaces (collapsed by the
+// browser when rendering the modal) can still be matched by what the user types.
+function normalizeConfirmName(s) {
+    return (s || '')
+        .replace(/[\u00AD\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Enable purge button when the normalized name matches
 $("#purgeConfirmText").on('input', function () {
     if (currentGroupIndex < 0) return;
     var group = trashGroups[currentGroupIndex];
-    var isValid = $(this).val() === group.name;
+    var isValid = normalizeConfirmName($(this).val()) === normalizeConfirmName(group.name);
     $("#confirmPurge").prop('disabled', !isValid);
 });
 

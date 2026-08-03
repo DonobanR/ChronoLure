@@ -35,7 +35,28 @@ type Result struct {
 	SendDate     time.Time `json:"send_date"`
 	Reported     bool      `json:"reported" sql:"not null"`
 	ModifiedDate time.Time `json:"modified_date"`
+	// Soft-delete (CL-102R): a deleted recipient lives in the Trash, is dropped
+	// from every metric, and can be Restored or Purged — same lifecycle as
+	// campaigns. DeleteBatchId groups a bulk deletion so "Undo" restores all at
+	// once. The row is kept until purge/TTL for auditability and reversibility.
+	DeletedAt     *time.Time `json:"deleted_at,omitempty" gorm:"column:deleted_at"`
+	DeletedBy     *int64     `json:"deleted_by,omitempty" gorm:"column:deleted_by"`
+	DeleteReason  string     `json:"delete_reason,omitempty" gorm:"column:delete_reason"`
+	RestoredAt    *time.Time `json:"restored_at,omitempty" gorm:"column:restored_at"`
+	RestoredBy    *int64     `json:"restored_by,omitempty" gorm:"column:restored_by"`
+	DeleteScope   string     `json:"delete_scope,omitempty" gorm:"column:delete_scope"`
+	DeleteBatchId string     `json:"delete_batch_id,omitempty" gorm:"column:delete_batch_id"`
 	BaseRecipient
+}
+
+// IsDeleted reports whether the recipient is in the Trash (soft-deleted).
+func (r *Result) IsDeleted() bool { return r.DeletedAt != nil }
+
+// ScopeActiveResults filters out soft-deleted recipients. Applied at every
+// per-recipient metric source so a trashed recipient does not exist for any
+// calculation (CL-102R).
+func ScopeActiveResults(db *gorm.DB) *gorm.DB {
+	return db.Where("deleted_at IS NULL")
 }
 
 func (r *Result) createEvent(status string, details interface{}) (*Event, error) {
@@ -193,7 +214,9 @@ func (r *Result) GenerateId(tx *gorm.DB) error {
 			return err
 		}
 		r.RId = rid
-		err = tx.Table("results").Where("r_id=?", r.RId).First(&Result{}).Error
+		// Unscoped(): r_id must be unique across ALL results, including trashed
+		// ones (CL-102R), or a new result could collide with a soft-deleted r_id.
+		err = tx.Unscoped().Table("results").Where("r_id=?", r.RId).First(&Result{}).Error
 		if err == gorm.ErrRecordNotFound {
 			break
 		}
@@ -201,10 +224,17 @@ func (r *Result) GenerateId(tx *gorm.DB) error {
 	return nil
 }
 
-// GetResult returns the Result object from the database
-// given the ResultId
+// GetResult returns the Result object from the database given the ResultId.
+//
+// Unscoped(): this MUST find soft-deleted recipients too (CL-102R). It backs the
+// phishing/landing/calendar tracking path, and §8 requires that a late event
+// from a trashed recipient is still written to the raw events log (so a restore
+// brings it back). Metrics exclude trashed recipients separately (getCampaignStats
+// / GetCampaignGroupStats / the events NOT-EXISTS filter), and the worker never
+// reaches a trashed recipient because GetQueuedMailLogs filters them and their
+// pending mail_logs are deleted in the soft-delete tx.
 func GetResult(rid string) (Result, error) {
 	r := Result{}
-	err := db.Where("r_id=?", rid).First(&r).Error
+	err := db.Unscoped().Where("r_id=?", rid).First(&r).Error
 	return r, err
 }

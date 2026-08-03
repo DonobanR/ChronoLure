@@ -135,21 +135,44 @@ const xlsxWorkbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`
 
-// xlsxStyles defines the fonts, fills and cell formats. Fill indexes 0/1 are
-// reserved by the spec (none/gray125); 2=verde, 3=#F4A020, 4=rojo, 5=amarillo.
+// statusFillARGB is the ONE colour table for recipient states, shared by the Excel
+// annex and by the Word annex table (CL-105). Its index is exactly what
+// statusStyleIndex returns, which is also the xlsx fill id — so both artefacts are
+// painted from this slice and a colour can never drift between them. Indexes 0/1 are
+// reserved by the spec (none/gray125) and stay empty.
+//
+// Values are ARGB, as SpreadsheetML requires; the DOCX takes the RRGGBB tail.
+var statusFillARGB = []string{
+	2: "FF92D050", // Correo Ignorado — verde
+	3: "FFF4A020", // Clic al Enlace
+	4: "FFFF0000", // Envío de Datos — rojo
+	5: "FFFFFF00", // Correo Abierto — amarillo
+}
+
+// xlsxStyles defines the fonts, fills and cell formats. The coloured fills are
+// generated from statusFillARGB rather than written out by hand, so editing that
+// slice repaints the Excel and the Word table together.
 // cellXfs: 0=plain, 1=bold header, 2/3/4/5=colored.
-const xlsxStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+var xlsxStyles = buildXlsxStyles()
+
+func buildXlsxStyles() string {
+	var fills strings.Builder
+	fills.WriteString(`<fill><patternFill patternType="none"/></fill>` + "\n")
+	fills.WriteString(`<fill><patternFill patternType="gray125"/></fill>` + "\n")
+	for i := 2; i < len(statusFillARGB); i++ {
+		fmt.Fprintf(&fills,
+			`<fill><patternFill patternType="solid"><fgColor rgb="%s"/><bgColor indexed="64"/></patternFill></fill>`+"\n",
+			statusFillARGB[i])
+	}
+	return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
-<fills count="6">
-<fill><patternFill patternType="none"/></fill>
-<fill><patternFill patternType="gray125"/></fill>
-<fill><patternFill patternType="solid"><fgColor rgb="FF92D050"/><bgColor indexed="64"/></patternFill></fill>
-<fill><patternFill patternType="solid"><fgColor rgb="FFF4A020"/><bgColor indexed="64"/></patternFill></fill>
-<fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/><bgColor indexed="64"/></patternFill></fill>
-<fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/><bgColor indexed="64"/></patternFill></fill>
-</fills>
-<borders count="1"><border/></borders>
+<fills count="` + fmt.Sprint(len(statusFillARGB)) + `">
+` + fills.String() + `</fills>
+<borders count="1"><border/></borders>` + xlsxStylesTail
+}
+
+const xlsxStylesTail = `
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
 <cellXfs count="6">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>

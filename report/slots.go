@@ -1,5 +1,10 @@
 package report
 
+import (
+	"regexp"
+	"strings"
+)
+
 // SlotSource describes how a slot's image is produced.
 type SlotSource int
 
@@ -23,6 +28,15 @@ type Slot struct {
 	Section  string     `json:"section"`
 	Source   SlotSource `json:"-"`
 	Required bool       `json:"required"`
+	// Deprecated marks a slot that NEW templates should not declare, but that older
+	// template versions still do. This is the general mechanism for retiring a slot:
+	// the catalog is a global singleton while templates are VERSIONED, so simply
+	// deleting an entry silently breaks every stored version that used it — the
+	// render stops substituting its image and the re-audit of its frozen renders
+	// reports a fingerprint mismatch. A deprecated slot therefore stays RESOLVABLE
+	// (CanonicalSlotKey/IsSlot/render) but is never required, never offered by
+	// /api/report-slots and never demanded by the pre-flight checks.
+	Deprecated bool `json:"deprecated,omitempty"`
 }
 
 // SourceName returns "manual" or "auto" for serialization/UI.
@@ -36,18 +50,23 @@ func (s Slot) SourceName() string {
 // Slots is the immutable catalog of image placeholders, in document order.
 // Note the intentional 8 -> 10 gap (no "Figura 9"). Only grafico_1 is generated.
 var Slots = []Slot{
-	{"logo", "Logo del cliente", "Logotipo de la empresa cliente (portada)", "Portada", SourceManual, true},
-	{"figura_1", "Figura 1: Correos identificados", "Captura de los correos de phishing identificados", "Sección 3 – Ejecución de la campaña", SourceManual, true},
-	{"figura_2", "Figura 2: Plantilla suplantada", "Captura de la plantilla de correo suplantada", "Sección 3 – Ejecución de la campaña", SourceManual, true},
-	{"figura_3", "Figura 3: Identificación del correo falso", "Captura señalando el remitente/dominio falso", "Sección 4 – Puntos clave", SourceManual, true},
-	{"figura_4", "Figura 4: Hipervínculo de redirección", "Captura del hipervínculo malicioso", "Sección 4 – Puntos clave", SourceManual, true},
-	{"figura_5", "Figura 5: Login de captura de credenciales", "Captura de la landing de captura de credenciales", "Sección 4 – Puntos clave", SourceManual, true},
-	{"figura_6", "Figura 6: Redirección a reunión cancelada", "Captura de la reunión/Teams cancelada", "Sección 4 – Puntos clave", SourceManual, true},
-	{"grafico_1", "Gráfico 1: Resultados", "Gráfica de resultados (generada automáticamente)", "Sección 5 – Resultados", SourceAutoChart, true},
-	{"evidencia_flujo", "Evidencia de credenciales válidas (flujo)", "Captura del flujo de autenticación con credenciales válidas", "Sección 6 – Evidencia de credenciales válidas", SourceManual, true},
-	{"figura_7", "Figura 7: Evidencia de Credenciales Usuario 1", "Captura de credenciales válidas del usuario", "Sección 7 – Evidencias de credenciales válidas", SourceManual, true},
-	{"figura_8", "Figura 8: Evidencia de Acceso por falta de 2FA", "Captura del acceso/2FA", "Sección 7 – Evidencias de credenciales válidas", SourceManual, true},
-	{"figura_10", "Figura 10: Usuarios que enviaron datos", "Captura del anexo de usuarios que enviaron datos", "Sección 10 – Anexos", SourceManual, true},
+	{"logo", "Logo del cliente", "Logotipo de la empresa cliente (portada)", "Portada", SourceManual, true, false},
+	{"figura_1", "Figura 1: Correos identificados", "Captura de los correos de phishing identificados", "Sección 3 – Ejecución de la campaña", SourceManual, true, false},
+	{"figura_2", "Figura 2: Plantilla suplantada", "Captura de la plantilla de correo suplantada", "Sección 3 – Ejecución de la campaña", SourceManual, true, false},
+	{"figura_3", "Figura 3: Identificación del correo falso", "Captura señalando el remitente/dominio falso", "Sección 4 – Puntos clave", SourceManual, true, false},
+	{"figura_4", "Figura 4: Hipervínculo de redirección", "Captura del hipervínculo malicioso", "Sección 4 – Puntos clave", SourceManual, true, false},
+	{"figura_5", "Figura 5: Login de captura de credenciales", "Captura de la landing de captura de credenciales", "Sección 4 – Puntos clave", SourceManual, true, false},
+	{"figura_6", "Figura 6: Redirección a reunión cancelada", "Captura de la reunión/Teams cancelada", "Sección 4 – Puntos clave", SourceManual, true, false},
+	{"grafico_1", "Gráfico 1: Resultados", "Gráfica de resultados (generada automáticamente)", "Sección 5 – Resultados", SourceAutoChart, true, false},
+	{"evidencia_flujo", "Evidencia de credenciales válidas (flujo)", "Captura del flujo de autenticación con credenciales válidas", "Sección 6 – Evidencia de credenciales válidas", SourceManual, true, false},
+	{"figura_7", "Figura 7: Evidencia de Credenciales Usuario 1", "Captura de credenciales válidas del usuario", "Sección 7 – Evidencias de credenciales válidas", SourceManual, true, false},
+	{"figura_8", "Figura 8: Evidencia de Acceso por falta de 2FA", "Captura del acceso/2FA", "Sección 7 – Evidencias de credenciales válidas", SourceManual, true, false},
+	// figura_10 was the S9 annex image ("Usuarios que enviaron datos"). CL-105
+	// replaces it with a native table at the {{TABLA_ANEXO}} marker, so new
+	// templates must not declare it — but 30 stored template versions do, and 29
+	// frozen renders carry an uploaded figura_10 asset. Kept DEPRECATED so those
+	// keep rendering and re-auditing byte-identically. Zero migration.
+	{"figura_10", "Figura 10: Usuarios que enviaron datos (obsoleta)", "Captura del anexo de usuarios que enviaron datos — sustituida por la tabla nativa del anexo", "Sección 10 – Anexos", SourceManual, false, true},
 }
 
 // slotByKey indexes the catalog for O(1) lookups.
@@ -59,19 +78,71 @@ var slotByKey = func() map[string]Slot {
 	return m
 }()
 
-// IsSlot reports whether key is a known image slot.
+var nonAlnumRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// normalizeSlotKey folds a slot key / Alt-Text to a canonical form so template
+// authoring variations don't break slot matching: it lowercases and drops every
+// non-alphanumeric character. This makes "figura_2", "Figura 2", "FIGURA_2" and
+// "figura_2 " (trailing space) all resolve to the same slot — the CL-104 fix.
+// The catalog keys collapse without collision (figura1..figura10, grafico1,
+// evidenciaflujo, logo), so the fold is safe.
+func normalizeSlotKey(s string) string {
+	return nonAlnumRe.ReplaceAllString(strings.ToLower(s), "")
+}
+
+// slotByNormKey indexes the catalog by normalized key.
+var slotByNormKey = func() map[string]Slot {
+	m := make(map[string]Slot, len(Slots))
+	for _, s := range Slots {
+		m[normalizeSlotKey(s.Key)] = s
+	}
+	return m
+}()
+
+// CanonicalSlotKey maps a possibly-messy Alt-Text/descr (any case, spaces,
+// underscores) to the catalog's canonical slot key. ok is false if it matches no
+// slot.
+func CanonicalSlotKey(raw string) (string, bool) {
+	s, ok := slotByNormKey[normalizeSlotKey(raw)]
+	if !ok {
+		return "", false
+	}
+	return s.Key, true
+}
+
+// IsSlot reports whether key is a known image slot (case/separator-insensitive).
 func IsSlot(key string) bool {
-	_, ok := slotByKey[key]
+	_, ok := slotByNormKey[normalizeSlotKey(key)]
 	return ok
 }
 
 // RequiredSlots returns the keys of all slots that must be present in a template.
+// Deprecated slots are never required: an old template may declare one and a new
+// one may omit it, and both must validate.
 func RequiredSlots() []string {
 	out := make([]string, 0, len(Slots))
 	for _, s := range Slots {
-		if s.Required {
+		if s.Required && !s.Deprecated {
 			out = append(out, s.Key)
 		}
 	}
 	return out
+}
+
+// ActiveSlots returns the slots offered to template authors and to the editor —
+// everything except the deprecated ones.
+func ActiveSlots() []Slot {
+	out := make([]Slot, 0, len(Slots))
+	for _, s := range Slots {
+		if !s.Deprecated {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// IsDeprecatedSlot reports whether a (possibly messy) slot key is deprecated.
+func IsDeprecatedSlot(key string) bool {
+	s, ok := slotByNormKey[normalizeSlotKey(key)]
+	return ok && s.Deprecated
 }

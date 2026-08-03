@@ -69,10 +69,27 @@
         </div>
         <div class="row">
             <h2>Details</h2>
+            <!-- CL-102R-b: persistent indicator + inline panel of trashed recipients -->
+            <div id="recipientTrashBanner" style="display:none"></div>
+            <div class="text-muted" id="recipientTotalNote" style="margin-bottom:6px"></div>
+            <!-- Bulk action bar: appears once rows are selected -->
+            <div id="recipientBulkBar" class="alert alert-info" role="status" aria-live="polite"
+                 style="display:none;margin-bottom:10px">
+                <span id="bulkSelectedCount"></span>
+                <button id="bulkDeleteBtn" class="btn btn-sm btn-danger" style="min-height:44px;margin-left:10px"
+                        onclick="confirmBulkDelete()">Eliminar</button>
+                <button class="btn btn-sm btn-default" style="min-height:44px"
+                        onclick="clearRecipientSelection()">Cancelar selección</button>
+            </div>
             <table id="resultsTable" class="table">
                 <thead>
                     <tr>
-                        <th>Result ID</th>
+                        <th class="no-sort text-center">
+                            <label style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;margin:0;cursor:pointer">
+                                <input type="checkbox" id="selectAllRecipients" aria-label="Seleccionar todos los destinatarios"
+                                       style="width:18px;height:18px;margin:0;cursor:pointer">
+                            </label>
+                        </th>
                         <th class="no-sort"></th>
                         <th>First Name</th>
                         <th>Last Name</th>
@@ -80,6 +97,8 @@
                         <th>Position</th>
                         <th>Status</th>
                         <th class="text-center">Reported</th>
+                        <th class="no-sort"></th>
+                        <th class="no-sort"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -133,5 +152,6 @@
 </div>
 
 {{end}} {{define "scripts"}}
-<script src="/js/dist/app/campaign_results.min.js"></script>
+<script src="/js/dist/app/trash_helpers.min.js?v=cl102rb"></script>
+<script src="/js/dist/app/campaign_results.min.js?v=cl102rb"></script>
 {{end}}

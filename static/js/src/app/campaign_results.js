@@ -636,6 +636,359 @@ var updateMap = function (results) {
  * @param {string} status 
  * @param {moment(datetime)} send_date 
  */
+// ── CL-102R-b: per-recipient actions ─────────────────────────────────────────
+//
+// Destructive actions live inside an overflow menu (⋯), in red, separated by a
+// divider from the benign ones. Fitts's law in reverse: a bare ✕ at the end of
+// every row — right next to the scrollbar — is a factory for accidental clicks.
+// The menu also keeps a 170-row table readable (Hick's law).
+
+// selectCell renders the row's selection checkbox. It reuses data column 0 (the
+// result id, previously hidden) so every other column index stays exactly where
+// the rest of this file expects it.
+function selectCell(rid) {
+    var safeRid = escapeHtml(String(rid))
+    // The checkbox glyph is ~18px, so the LABEL provides the ≥44×44 hit area
+    // (WCAG 2.5.5): 44px box, checkbox centred inside it. Without the wrapper the
+    // clickable region would be 18px — the row looked 44px tall but the target was not.
+    return '<label style="display:inline-flex;align-items:center;justify-content:center;' +
+        'width:44px;height:44px;margin:0;cursor:pointer">' +
+        '<input type="checkbox" class="recipient-select" value="' + safeRid + '" ' +
+        'aria-label="Seleccionar destinatario" ' +
+        'style="width:18px;height:18px;margin:0;cursor:pointer">' +
+        '</label>'
+}
+
+// rowActionsMenu renders the ⋯ overflow menu for one row.
+function rowActionsMenu(rid) {
+    var safeAttr = escapeHtml(String(rid))
+    var safeJs = String(rid).replace(/'/g, "\\'")
+    return '<div class="btn-group">' +
+        '<button type="button" class="btn btn-link dropdown-toggle recipient-menu-btn" data-toggle="dropdown" ' +
+        'aria-haspopup="true" aria-expanded="false" aria-label="Acciones del destinatario" ' +
+        'style="min-width:44px;min-height:44px;color:#6c7a89">' +
+        '<i class="fa fa-ellipsis-h"></i></button>' +
+        '<ul class="dropdown-menu dropdown-menu-right" role="menu">' +
+        '<li role="presentation"><a role="menuitem" href="#" data-rid="' + safeAttr + '" ' +
+        'onclick="toggleRecipientTimeline(\'' + safeJs + '\'); return false;">' +
+        '<i class="fa fa-clock-o"></i> Ver cronología</a></li>' +
+        '<li role="separator" class="divider"></li>' +
+        '<li role="presentation"><a role="menuitem" href="#" style="color:#c9302c" ' +
+        'onclick="deleteRecipient(\'' + safeJs + '\'); return false;">' +
+        '<i class="fa fa-trash-o"></i> Eliminar destinatario</a></li>' +
+        '</ul></div>'
+}
+
+// toggleRecipientTimeline expands/collapses a row's timeline — the same thing
+// clicking the caret does, exposed as the benign menu action.
+function toggleRecipientTimeline(rid) {
+    var table = $("#resultsTable").DataTable()
+    table.rows().every(function (i) {
+        var row = this.row(i)
+        if (String(row.data()[0]) !== String(rid)) return
+        var tr = $(row.node())
+        if (row.child.isShown()) {
+            row.child.hide()
+            tr.find("#caret").removeClass("fa-caret-down").addClass("fa-caret-right")
+        } else {
+            row.child(renderTimeline(row.data())).show()
+            tr.find("#caret").removeClass("fa-caret-right").addClass("fa-caret-down")
+        }
+    })
+}
+
+// deleteRecipient soft-deletes ONE recipient with no confirmation dialog: the
+// action is reversible, and confirming reversible actions teaches the user to
+// click "Sí" without reading — which then fails to protect the purge, where it
+// matters. Undo > Confirm for anything reversible.
+function deleteRecipient(rid) {
+    api.campaignId.resultDelete(campaign.id, rid, "", "campaign")
+        .success(function (resp) {
+            recipientDeletedToast("Se eliminó el destinatario. Ya no cuenta en las métricas.", resp.batch_id)
+            refreshAfterRecipientChange()
+        })
+        .error(recipientActionError)
+}
+
+// ── Multi-select + bulk delete ────────────────────────────────────────────────
+
+// selectedRecipientIds returns the checked rows across ALL pages of the table.
+function selectedRecipientIds() {
+    var ids = []
+    $("#resultsTable").find("input.recipient-select:checked").each(function () {
+        ids.push($(this).val())
+    })
+    return ids
+}
+
+// updateBulkBar shows/hides the bulk action bar and keeps its label truthful.
+function updateBulkBar() {
+    var ids = selectedRecipientIds()
+    var state = TrashHelpers.selectionState(ids)
+    $("#bulkSelectedCount").text(state.count === 1 ? "1 destinatario seleccionado" : state.count + " destinatarios seleccionados")
+    $("#bulkDeleteBtn").text(state.confirmLabel || "Eliminar")
+    $("#recipientBulkBar").toggle(state.showBar)
+}
+
+// emailsForSelected maps the selected result ids to their emails, so the
+// confirmation can LIST what is going away (recognition over recall).
+function emailsForSelected(ids) {
+    var byId = {}
+    ;(campaign.results || []).forEach(function (r) { byId[String(r.id)] = r.email })
+    return ids.map(function (id) { return byId[String(id)] || id })
+}
+
+// deleteScopePreview asks the SERVER what a deletion would touch. Both numbers the
+// dialog shows come from here.
+//
+// The previous version derived this client-side from /campaign-groups/summary and
+// was broken twice over: that endpoint returns a bare ARRAY (not
+// {campaign_groups:[…]}) and carries no campaigns[], so the lookup always yielded
+// null and the group radio NEVER rendered — the group scope was unreachable from
+// the UI. It also computed "affected" as selected × campaigns-in-group, which is a
+// count of campaigns, not of matching rows.
+function deleteScopePreview(rids, callback) {
+    api.campaignId.resultsDeletePreview(campaign.id, rids, "group")
+        .success(function (prev) { callback(prev || {}) })
+        .error(function () { callback({ in_group: false, affected: rids.length }) })
+}
+
+// confirmBulkDelete opens the bulk confirmation: lists the emails, forces an
+// explicit scope choice with its REAL consequence, states that generated reports do
+// not change, defaults to Cancel, and labels the confirm button with number+object.
+// The body markup comes from TrashHelpers.buildBulkConfirmHtml, a pure function
+// whose resulting DOM is asserted in test/js/dialogs_dom.test.js.
+function confirmBulkDelete() {
+    var ids = selectedRecipientIds()
+    if (!ids.length) return
+    var emails = emailsForSelected(ids)
+
+    deleteScopePreview(ids, function (preview) {
+        Swal.fire({
+            title: "Eliminar " + TrashHelpers.pluralizeRecipients(ids.length),
+            html: TrashHelpers.buildBulkConfirmHtml(emails, preview),
+            type: "warning",
+            animation: false,
+            showCancelButton: true,
+            focusCancel: true, // destructive actions are never the default
+            reverseButtons: true,
+            allowOutsideClick: false,
+            confirmButtonText: "Eliminar " + TrashHelpers.pluralizeRecipients(ids.length),
+            confirmButtonColor: "#c9302c",
+            cancelButtonText: "Cancelar",
+            preConfirm: function () {
+                return {
+                    scope: $('input[name="bulkScope"]:checked').val() || "campaign",
+                    reason: $("#bulkReason").val() || ""
+                }
+            }
+        }).then(function (result) {
+            if (!result.value) return
+            api.campaignId.resultsBulkDelete(campaign.id, ids, result.value.reason, result.value.scope)
+                .success(function (resp) {
+                    recipientDeletedToast(
+                        "Se eliminaron " + TrashHelpers.pluralizeRecipients(resp.affected || ids.length) +
+                        ". Las métricas se actualizaron.", resp.batch_id)
+                    refreshAfterRecipientChange()
+                })
+                .error(recipientActionError)
+        })
+    })
+}
+
+// recipientDeletedToast shows a success toast offering to undo the whole batch.
+// The toast never steals focus (that would break keyboard navigation) but the
+// Undo button is the next tabbable element, and the container is aria-live so
+// screen readers announce the change. With prefers-reduced-motion the timer is
+// stretched and the animation dropped.
+function recipientDeletedToast(msg, batchID) {
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    Swal.fire({
+        toast: true, position: "top-end", type: "success",
+        title: msg,
+        animation: !reduced,
+        html: batchID
+            ? '<button id="undoRecipient" class="btn btn-sm btn-default" style="margin-top:6px;min-height:44px">Deshacer</button> ' +
+              '<a class="btn btn-sm btn-link" style="min-height:44px" href="/trash?type=recipient">Ver papelera</a>'
+            : undefined,
+        showConfirmButton: false,
+        timer: reduced ? 20000 : 10000,
+        timerProgressBar: true,
+        onOpen: function (el) {
+            el.setAttribute('role', 'status')
+            el.setAttribute('aria-live', 'polite')
+            var btn = el.querySelector('#undoRecipient')
+            if (btn && batchID) {
+                btn.onclick = function () {
+                    api.recipientTrash.restoreBatch(batchID)
+                        .success(function (r) {
+                            Swal.fire({
+                                toast: true, position: "top-end", type: "success",
+                                title: "Se restauraron " + TrashHelpers.pluralizeRecipients(r.restored || 0) + ".",
+                                showConfirmButton: false, timer: 4000
+                            })
+                            refreshAfterRecipientChange()
+                        })
+                        .error(recipientActionError)
+                }
+            }
+        }
+    })
+}
+
+// refreshAfterRecipientChange is the SINGLE refresh path after any recipient
+// mutation (delete, undo, restore). The toast, the banner, the "(N en papelera)"
+// total, the table and the donuts all read the same numbers from different
+// places; refreshing them together is what keeps them from disagreeing. A stale
+// badge destroys trust in the number just as effectively as a wrong count.
+function refreshAfterRecipientChange() {
+    poll()                  // table + donuts + timeline (re-reads results)
+    loadTrashedRecipients() // banner + inline panel + "(N en papelera)"
+    $("#recipientBulkBar").hide()
+    $("#selectAllRecipients").prop("checked", false)
+}
+
+// wireRecipientSelection binds the select-all checkbox and per-row checkboxes.
+// Bound with delegation so it survives DataTables re-draws and paging.
+function wireRecipientSelection(table) {
+    var $t = $("#resultsTable")
+    // Bind once; DataTables re-renders the cells on every draw.
+    if (!$t.data("selectionWired")) {
+        $t.on("change", "input.recipient-select", function () {
+            updateBulkBar()
+            // Keep select-all honest: checked only when every visible row is.
+            var total = $t.find("input.recipient-select").length
+            var checked = $t.find("input.recipient-select:checked").length
+            $("#selectAllRecipients").prop("checked", total > 0 && total === checked)
+        })
+        // A checkbox click must not also toggle the row's timeline.
+        $t.on("click", "input.recipient-select", function (e) { e.stopPropagation() })
+        $("#selectAllRecipients").on("change", function () {
+            var on = $(this).is(":checked")
+            $t.find("input.recipient-select").prop("checked", on)
+            updateBulkBar()
+        })
+        $t.data("selectionWired", true)
+    }
+    updateBulkBar()
+}
+
+// clearRecipientSelection drops the selection and hides the bulk bar.
+function clearRecipientSelection() {
+    $("#resultsTable").find("input.recipient-select").prop("checked", false)
+    $("#selectAllRecipients").prop("checked", false)
+    updateBulkBar()
+}
+
+// ── Banner + inline panel of trashed recipients (addendum §5) ─────────────────
+
+var trashedRecipients = []
+
+// loadTrashedRecipients keeps the persistent indicator honest: while this
+// campaign has recipients in the Trash, the user must be able to see that the
+// metrics exclude them — otherwise someone reads 167 where they expected 170 two
+// weeks later with no way to find out why.
+function loadTrashedRecipients() {
+    if (!campaign || !campaign.id) return
+    api.campaignId.resultsTrashed(campaign.id)
+        .success(function (data) {
+            trashedRecipients = (data && data.items) || []
+            renderTrashedBanner()
+        })
+        .error(function () { /* the banner is informational; never block the page */ })
+}
+
+function renderTrashedBanner() {
+    var n = trashedRecipients.length
+    var $banner = $("#recipientTrashBanner")
+    if (!n) {
+        $banner.hide().empty()
+        $("#recipientTotalNote").text("")
+        return
+    }
+    // Total shown as "Total: 167 destinatarios (3 en papelera)".
+    var active = (campaign.results || []).length
+    $("#recipientTotalNote").text("Total: " + TrashHelpers.pluralizeRecipients(active) +
+        "  (" + n + " en papelera)")
+
+    var rows = trashedRecipients.map(function (it) {
+        var blocked = TrashHelpers.restoreBlockedReason(it)
+        var badge = blocked
+            ? ' <span class="label label-warning"><i class="fa fa-exclamation-triangle"></i> Campaña en papelera</span>'
+            : ''
+        var btn = blocked
+            ? '<button class="btn btn-xs btn-default" disabled data-toggle="tooltip" title="' + escapeHtml(blocked) + '" ' +
+              'style="min-height:44px;min-width:44px">Restaurar</button>'
+            : '<button class="btn btn-xs btn-success" style="min-height:44px;min-width:44px" ' +
+              'onclick="restoreOneRecipient(' + it.id + ')">Restaurar</button>'
+        return '<tr><td>' + escapeHtml(it.email) + badge + '</td>' +
+            '<td class="text-muted">' + escapeHtml(it.reason || '—') + '</td>' +
+            '<td class="text-muted">' + escapeHtml(it.deleted_by_name || '—') + '</td>' +
+            '<td class="text-right">' + btn + '</td></tr>'
+    }).join('')
+
+    $banner.html(
+        '<div class="alert alert-warning" role="status" aria-live="polite" style="margin-bottom:10px">' +
+        '<i class="fa fa-trash-o"></i> <strong>' + TrashHelpers.pluralizeRecipients(n) +
+        ' eliminados</strong> no se están contando en estas métricas. ' +
+        '<button class="btn btn-xs btn-default" style="min-height:44px" onclick="$(\'#recipientTrashPanel\').toggle()">Ver / ocultar</button> ' +
+        '<a class="btn btn-xs btn-link" style="min-height:44px" href="/trash?type=recipient&campaign=' + campaign.id + '">Ver en papelera</a>' +
+        '<div id="recipientTrashPanel" style="display:none;margin-top:10px">' +
+        '<table class="table table-condensed" style="margin-bottom:6px"><thead><tr>' +
+        '<th>Correo</th><th>Motivo</th><th>Eliminado por</th><th class="text-right">Acción</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<button class="btn btn-sm btn-success" style="min-height:44px" onclick="restoreAllTrashedRecipients()">' +
+        'Restaurar los ' + n + '</button> ' +
+        '<span class="text-muted" style="font-size:.9em">Para eliminarlos definitivamente, ve a la Papelera.</span>' +
+        '</div></div>'
+    ).show()
+    $('[data-toggle="tooltip"]').tooltip()
+}
+
+// restoreOneRecipient restores a single recipient from the inline panel.
+function restoreOneRecipient(resultID) {
+    api.recipientTrash.restore(resultID)
+        .success(function () {
+            Swal.fire({
+                toast: true, position: "top-end", type: "success",
+                title: "Se restauró el destinatario.", showConfirmButton: false, timer: 4000
+            })
+            refreshAfterRecipientChange()
+        })
+        .error(recipientActionError)
+}
+
+// restoreAllTrashedRecipients restores every trashed recipient of this campaign,
+// skipping the ones blocked by a trashed parent campaign (it reports them).
+function restoreAllTrashedRecipients() {
+    var restorable = trashedRecipients.filter(function (it) { return !TrashHelpers.restoreBlockedReason(it) })
+    var blocked = trashedRecipients.length - restorable.length
+    if (!restorable.length) {
+        Swal.fire({ type: "info", title: "Nada que restaurar", text: "Todos están bloqueados porque su campaña está en la papelera." })
+        return
+    }
+    var done = 0
+    restorable.forEach(function (it) {
+        api.recipientTrash.restore(it.id).always(function () {
+            done++
+            if (done === restorable.length) {
+                Swal.fire({
+                    toast: true, position: "top-end", type: "success",
+                    title: "Se restauraron " + TrashHelpers.pluralizeRecipients(restorable.length) + "." +
+                        (blocked ? " " + blocked + " siguen bloqueados." : ""),
+                    showConfirmButton: false, timer: 5000
+                })
+                refreshAfterRecipientChange()
+            }
+        })
+    })
+}
+
+function recipientActionError(xhr) {
+    var msg = (xhr && xhr.responseJSON && xhr.responseJSON.message) || "No se pudo completar la acción sobre el destinatario"
+    Swal.fire({ type: "error", title: "Error", text: msg })
+}
+
 function createStatusLabel(status, send_date) {
     var label = statuses[status].label || "label-default";
     var statusColumn = "<span class=\"label " + label + "\">" + status + "</span>"
@@ -694,7 +1047,7 @@ function poll() {
                     email_series_data[progressListing[i]]++
                 }
             })
-            $.each(email_series_data, function (status, count) {
+                        $.each(email_series_data, function (status, count) {
                 var email_data = []
                 if (!(status in statusMapping)) {
                     return true
@@ -788,11 +1141,33 @@ function load() {
                             className: "details-control",
                             "targets": [1]
                         }, {
+                            // Column 0 used to be a hidden "Result ID"; it now renders
+                            // the selection checkbox from that same value, so every
+                            // other column index in this file stays put.
+                            "orderable": false,
+                            "className": "text-center",
+                            "render": function (rid, type) {
+                                return type === "display" ? selectCell(rid) : rid
+                            },
+                            "targets": [0]
+                        }, {
                             "visible": false,
-                            "targets": [0, 8]
+                            "targets": [8]
+                        }, {
+                            // Overflow menu (⋯) with the destructive action inside.
+                            "orderable": false,
+                            "className": "text-right",
+                            "render": function (_, type, row) {
+                                return type === "display" ? rowActionsMenu(row[0]) : ""
+                            },
+                            "targets": [9]
                         },
                         {
                             "render": function (data, type, row) {
+                                if (type !== "display") {
+                                    return data
+                                }
+                                // row[0]=rid, row[8]=send_date, row[9]=excluded (carried, not columns)
                                 return createStatusLabel(data, row[8])
                             },
                             "targets": [6]
@@ -828,7 +1203,8 @@ function load() {
                         escapeHtml(result.position) || "",
                         result.status,
                         result.reported,
-                        moment(result.send_date).format('MMMM Do YYYY, h:mm:ss a')
+                        moment(result.send_date).format('MMMM Do YYYY, h:mm:ss a'),
+                        "" // column 9: rendered as the ⋯ actions menu
                     ])
                     email_series_data[result.status]++;
                     if (result.reported) {
@@ -843,6 +1219,9 @@ function load() {
                 resultsTable.draw();
                 // Setup tooltips
                 $('[data-toggle="tooltip"]').tooltip()
+                // CL-102R-b: selection wiring + trashed-recipient banner.
+                wireRecipientSelection(resultsTable)
+                loadTrashedRecipients()
                 // Setup the individual timelines
                 $('#resultsTable tbody').on('click', 'td.details-control', function () {
                     var tr = $(this).closest('tr');
@@ -880,7 +1259,7 @@ function load() {
                 renderTimelineChart({
                     data: timeline_series_data
                 })
-                $.each(email_series_data, function (status, count) {
+                                $.each(email_series_data, function (status, count) {
                     var email_data = []
                     if (!(status in statusMapping)) {
                         return true

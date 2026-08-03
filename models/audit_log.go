@@ -18,6 +18,11 @@ const (
 	AuditGroupSoftDeleted = "CAMPAIGN_GROUP_SOFT_DELETED"
 	AuditGroupRestored    = "CAMPAIGN_GROUP_RESTORED"
 	AuditGroupPurged      = "CAMPAIGN_GROUP_PURGED"
+
+	// Recipient soft-delete lifecycle (CL-102R)
+	AuditRecipientSoftDeleted = "recipient_soft_deleted"
+	AuditRecipientRestored    = "recipient_restored"
+	AuditRecipientPurged      = "recipient_purged"
 )
 
 // AuditLog represents an audit trail entry
